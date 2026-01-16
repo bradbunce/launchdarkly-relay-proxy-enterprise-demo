@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>LaunchDarkly Demo</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .main-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto 1fr;
+      gap: 20px;
+      height: calc(100vh - 40px);
+    }
+    .app-section {
+      grid-column: 1 / -1;
+      background-color: white;
+      padding: 40px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      text-align: center;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 20px;
+    }
+    .title-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    .logo {
+      height: 50px;
+      width: auto;
+    }
+    #message {
+      font-size: 24px;
+      color: #405BFF;
+      font-weight: 500;
+      padding: 20px;
+      background-color: #f8f9ff;
+      border-radius: 4px;
+    }
+    .console-container {
+      background-color: #1e1e1e;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .console-header {
+      background-color: #2d2d2d;
+      color: #fff;
+      padding: 10px 15px;
+      font-weight: 600;
+      font-size: 14px;
+      border-bottom: 1px solid #3e3e3e;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .clear-btn {
+      background-color: #405BFF;
+      color: white;
+      border: none;
+      padding: 5px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .clear-btn:hover {
+      background-color: #3347cc;
+    }
+    .console-output {
+      flex: 1;
+      overflow-y: auto;
+      padding: 15px;
+      font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+      font-size: 12px;
+      color: #d4d4d4;
+      line-height: 1.5;
+    }
+    .log-line {
+      margin-bottom: 4px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .log-timestamp {
+      color: #858585;
+      margin-right: 8px;
+    }
+    .log-info {
+      color: #4ec9b0;
+    }
+    .log-error {
+      color: #f48771;
+    }
+    .log-warn {
+      color: #dcdcaa;
+    }
+    .context-selector {
+      margin-top: 30px;
+      text-align: left;
+      max-width: 500px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .context-selector h3 {
+      font-size: 18px;
+      margin-bottom: 15px;
+      color: #333;
+    }
+    .radio-group {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    .radio-group label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .radio-group input[type="radio"] {
+      cursor: pointer;
+    }
+    .input-group {
+      margin-bottom: 15px;
+    }
+    .input-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #555;
+    }
+    .input-group input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    .input-group input:focus {
+      outline: none;
+      border-color: #405BFF;
+    }
+    .update-btn {
+      background-color: #405BFF;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      width: 100%;
+    }
+    .update-btn:hover {
+      background-color: #3347cc;
+    }
+    .geo-status {
+      margin-bottom: 15px;
+      padding: 10px;
+      background-color: #f8f9ff;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .context-display {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #f8f9ff;
+      border-radius: 4px;
+      border: 1px solid #405BFF;
+    }
+    .context-display h4 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+      color: #405BFF;
+    }
+    .context-info {
+      font-size: 13px;
+      color: #333;
+      line-height: 1.6;
+    }
+    .context-info strong {
+      color: #555;
+    }
+    .edit-context-btn {
+      margin-top: 10px;
+      background-color: #405BFF;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .edit-context-btn:hover {
+      background-color: #3347cc;
+    }
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      align-items: center;
+      justify-content: center;
+    }
+    .modal.show {
+      display: flex;
+    }
+    .modal-content {
+      background-color: white;
+      padding: 30px;
+      border-radius: 8px;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .modal-header h3 {
+      margin: 0;
+      font-size: 20px;
+      color: #333;
+    }
+    .close-btn {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #999;
+      padding: 0;
+      width: 30px;
+      height: 30px;
+      line-height: 1;
+    }
+    .close-btn:hover {
+      color: #333;
+    }
+    .modal-buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .modal-buttons button {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .save-btn {
+      background-color: #405BFF;
+      color: white;
+    }
+    .save-btn:hover {
+      background-color: #3347cc;
+    }
+    .cancel-btn {
+      background-color: #e0e0e0;
+      color: #333;
+    }
+    .cancel-btn:hover {
+      background-color: #d0d0d0;
+    }
+    .status-content {
+      background-color: #f8f9ff;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 15px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .status-section {
+      margin-bottom: 15px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid #ddd;
+    }
+    .status-section:last-child {
+      border-bottom: none;
+    }
+    .status-section h4 {
+      margin: 0 0 10px 0;
+      color: #405BFF;
+      font-size: 14px;
+    }
+    .status-item {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 5px;
+      font-size: 13px;
+    }
+    .status-label {
+      font-weight: 500;
+      color: #555;
+    }
+    .status-value {
+      color: #333;
+    }
+    .status-ok {
+      color: #4ec9b0;
+      font-weight: 600;
+    }
+    .status-error {
+      color: #f48771;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="main-container">
+    <div class="app-section">
+      <div class="title-container">
+        <img src="/launchdarkly-logo.svg" alt="LaunchDarkly Logo" class="logo">
+        <h1>LaunchDarkly Relay Proxy Enterprise Demo</h1>
+        <img src="/launchdarkly-logo.svg" alt="LaunchDarkly Logo" class="logo">
+      </div>
+      <div id="message">Loading...</div>
+      
+      <div class="context-display">
+        <h4>Current User Context</h4>
+        <div class="context-info" id="contextInfo">
+          <div><strong>Type:</strong> Anonymous</div>
+        </div>
+        <button class="edit-context-btn" onclick="openContextModal()">Change Context</button>
+      </div>
+      
+      <div style="margin-top: 20px; text-align: center;">
+        <button class="edit-context-btn" onclick="openStatusModal()">View Relay Proxy Status</button>
+        <button class="edit-context-btn" onclick="openLoadTestModal()" style="margin-left: 10px;">Run Load Test</button>
+      </div>
+    </div>
+    
+    <div class="console-container">
+      <div class="console-header">
+        <span>app-dev container logs</span>
+        <button class="clear-btn" onclick="clearLogs('app-logs')">Clear</button>
+      </div>
+      <div class="console-output" id="app-logs"></div>
+    </div>
+    
+    <div class="console-container">
+      <div class="console-header">
+        <span>relay-proxy container logs</span>
+        <button class="clear-btn" onclick="clearLogs('relay-logs')">Clear</button>
+      </div>
+      <div class="console-output" id="relay-logs"></div>
+    </div>
+  </div>
+
+  <!-- Context Modal -->
+  <div id="contextModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>User Context Settings</h3>
+        <button class="close-btn" onclick="closeContextModal()">&times;</button>
+      </div>
+      
+      <div class="radio-group">
+        <label>
+          <input type="radio" name="modalContextType" value="anonymous" checked onchange="toggleModalContextInputs()">
+          Anonymous User
+        </label>
+        <label>
+          <input type="radio" name="modalContextType" value="custom" onchange="toggleModalContextInputs()">
+          Custom User
+        </label>
+      </div>
+      
+      <div id="modalCustomContextInputs" style="display: none; margin-top: 20px;">
+        <div class="input-group">
+          <label for="modalUserEmail">Email Address *</label>
+          <input type="email" id="modalUserEmail" placeholder="user@example.com" required>
+        </div>
+        <div class="input-group">
+          <label for="modalUserName">Name (optional)</label>
+          <input type="text" id="modalUserName" placeholder="John Doe">
+        </div>
+        <div class="geo-status" id="modalGeoStatus">
+          <span style="color: #858585;">Location: Detecting...</span>
+        </div>
+      </div>
+      
+      <div class="modal-buttons">
+        <button class="cancel-btn" onclick="closeContextModal()">Cancel</button>
+        <button class="save-btn" onclick="saveContext()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Relay Proxy Status Modal -->
+  <div id="statusModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Relay Proxy Status</h3>
+        <button class="close-btn" onclick="closeStatusModal()">&times;</button>
+      </div>
+      
+      <div class="status-content" id="statusContent">
+        <div style="text-align: center; color: #858585;">Loading status...</div>
+      </div>
+      
+      <div class="modal-buttons">
+        <button class="save-btn" onclick="closeStatusModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Load Test Modal -->
+  <div id="loadTestModal" class="modal">
+    <div class="modal-content" style="max-width: 700px;">
+      <div class="modal-header">
+        <h3>Load Test</h3>
+        <button class="close-btn" onclick="closeLoadTestModal()">&times;</button>
+      </div>
+      
+      <div style="margin: 20px 0;">
+        <div class="input-group">
+          <label for="loadTestClients">Number of Clients</label>
+          <input type="number" id="loadTestClients" value="10" min="1" max="100">
+        </div>
+        <div class="input-group">
+          <label for="loadTestDuration">Duration (seconds)</label>
+          <input type="number" id="loadTestDuration" value="30" min="5" max="300">
+        </div>
+        <div class="input-group">
+          <label for="loadTestInterval">Evaluation Interval (ms)</label>
+          <input type="number" id="loadTestInterval" value="1000" min="100" max="10000">
+        </div>
+      </div>
+      
+      <div class="status-content" id="loadTestOutput" style="max-height: 300px; font-family: monospace; font-size: 12px;">
+        <div style="color: #858585;">Configure test parameters and click Start</div>
+      </div>
+      
+      <div class="modal-buttons">
+        <button class="cancel-btn" onclick="closeLoadTestModal()">Close</button>
+        <button class="save-btn" id="loadTestBtn" onclick="startLoadTest()">Start Load Test</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Current context configuration
+    let currentContextType = 'anonymous';
+    let customUserContext = null;
+    let userLocation = null;
+    let locationDetected = false;
+    
+    // Automatically detect location on page load
+    async function detectLocation() {
+      if (locationDetected) return; // Only detect once
+      
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const latitude = position.coords.latitude;
+            const longitude = position.coords.longitude;
+            
+            try {
+              // Use reverse geocoding to get location name
+              const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+              const data = await response.json();
+              
+              // Extract city and country
+              const city = data.address.city || data.address.town || data.address.village || data.address.county;
+              const country = data.address.country;
+              userLocation = city && country ? `${city}, ${country}` : data.display_name;
+              
+              locationDetected = true;
+              updateModalGeoStatus(`Location: ${userLocation}`);
+              
+              // If we're anonymous, reconnect with location
+              if (currentContextType === 'anonymous') {
+                reconnectMessageStream();
+              }
+            } catch (error) {
+              console.error('Geocoding error:', error);
+              userLocation = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+              locationDetected = true;
+              updateModalGeoStatus(`Location: ${userLocation}`);
+            }
+          },
+          (error) => {
+            console.error('Geolocation error:', error);
+            updateModalGeoStatus('Location: Not available (permission denied or error)');
+          }
+        );
+      } else {
+        updateModalGeoStatus('Location: Not supported by browser');
+      }
+    }
+    
+    // Update context display
+    function updateContextDisplay() {
+      const contextInfo = document.getElementById('contextInfo');
+      
+      if (currentContextType === 'anonymous') {
+        let html = '<div><strong>Type:</strong> Anonymous</div>';
+        if (userLocation) {
+          html += `<div><strong>Location:</strong> ${userLocation}</div>`;
+        }
+        contextInfo.innerHTML = html;
+      } else if (customUserContext) {
+        let html = '<div><strong>Type:</strong> Custom User</div>';
+        html += `<div><strong>Email:</strong> ${customUserContext.email}</div>`;
+        if (customUserContext.name) {
+          html += `<div><strong>Name:</strong> ${customUserContext.name}</div>`;
+        }
+        if (customUserContext.location) {
+          html += `<div><strong>Location:</strong> ${customUserContext.location}</div>`;
+        }
+        contextInfo.innerHTML = html;
+      }
+    }
+    
+    // Modal functions
+    function openContextModal() {
+      const modal = document.getElementById('contextModal');
+      modal.classList.add('show');
+      
+      // Pre-fill with current values
+      if (currentContextType === 'custom' && customUserContext) {
+        document.querySelector('input[name="modalContextType"][value="custom"]').checked = true;
+        document.getElementById('modalUserEmail').value = customUserContext.email || '';
+        document.getElementById('modalUserName').value = customUserContext.name || '';
+        toggleModalContextInputs();
+      } else {
+        document.querySelector('input[name="modalContextType"][value="anonymous"]').checked = true;
+        toggleModalContextInputs();
+      }
+      
+      // Update location status in modal
+      if (userLocation) {
+        updateModalGeoStatus(`Location: ${userLocation}`);
+      } else if (locationDetected) {
+        updateModalGeoStatus('Location: Not available');
+      } else {
+        updateModalGeoStatus('Location: Detecting...');
+      }
+    }
+    
+    function closeContextModal() {
+      const modal = document.getElementById('contextModal');
+      modal.classList.remove('show');
+      // Reset form
+      document.getElementById('modalUserEmail').value = '';
+      document.getElementById('modalUserName').value = '';
+    }
+    
+    function toggleModalContextInputs() {
+      const contextType = document.querySelector('input[name="modalContextType"]:checked').value;
+      const customInputs = document.getElementById('modalCustomContextInputs');
+      
+      if (contextType === 'custom') {
+        customInputs.style.display = 'block';
+      } else {
+        customInputs.style.display = 'none';
+      }
+    }
+    
+    function saveContext() {
+      const contextType = document.querySelector('input[name="modalContextType"]:checked').value;
+      
+      if (contextType === 'anonymous') {
+        currentContextType = 'anonymous';
+        customUserContext = null;
+      } else {
+        const email = document.getElementById('modalUserEmail').value.trim();
+        const name = document.getElementById('modalUserName').value.trim();
+        
+        if (!email) {
+          alert('Email address is required for custom user context');
+          return;
+        }
+        
+        currentContextType = 'custom';
+        customUserContext = {
+          email: email,
+          name: name || undefined,
+          location: userLocation || undefined
+        };
+      }
+      
+      updateContextDisplay();
+      closeContextModal();
+      reconnectMessageStream();
+    }
+    
+    function updateModalGeoStatus(message) {
+      const geoStatus = document.getElementById('modalGeoStatus');
+      if (geoStatus) {
+        geoStatus.innerHTML = `<span style="color: #405BFF;">${message}</span>`;
+      }
+    }
+    
+    // Relay Proxy Status Modal
+    async function openStatusModal() {
+      const modal = document.getElementById('statusModal');
+      modal.classList.add('show');
+      
+      // Fetch status
+      const statusContent = document.getElementById('statusContent');
+      statusContent.innerHTML = '<div style="text-align: center; color: #858585;">Loading status...</div>';
+      
+      try {
+        const response = await fetch('/api/relay-status');
+        const status = await response.json();
+        
+        if (status.error) {
+          statusContent.innerHTML = `<div style="color: #f48771;">Error: ${status.error}</div>`;
+          return;
+        }
+        
+        // Build status display
+        let html = '';
+        
+        // Performance Metrics Section
+        html += '<div class="status-section">';
+        html += '<h4>Performance Metrics</h4>';
+        html += '<div id="metricsContent" style="color: #858585;">Loading metrics...</div>';
+        html += '</div>';
+        
+        // Overall status
+        html += '<div class="status-section">';
+        html += '<h4>Overall Status</h4>';
+        html += `<div class="status-item"><span class="status-label">Status:</span><span class="${status.status === 'healthy' ? 'status-ok' : 'status-error'}">${status.status || 'unknown'}</span></div>`;
+        if (status.version) {
+          html += `<div class="status-item"><span class="status-label">Version:</span><span class="status-value">${status.version}</span></div>`;
+        }
+        if (status.clientVersion) {
+          html += `<div class="status-item"><span class="status-label">Client Version:</span><span class="status-value">${status.clientVersion}</span></div>`;
+        }
+        html += '</div>';
+        
+        // Persistent storage
+        if (status.dataStoreStatus) {
+          html += '<div class="status-section">';
+          html += '<h4>Persistent Storage</h4>';
+          html += `<div class="status-item"><span class="status-label">State:</span><span class="${status.dataStoreStatus.state === 'VALID' ? 'status-ok' : 'status-error'}">${status.dataStoreStatus.state || 'unknown'}</span></div>`;
+          if (status.dataStoreStatus.stateSince) {
+            const date = new Date(status.dataStoreStatus.stateSince);
+            html += `<div class="status-item"><span class="status-label">State Since:</span><span class="status-value">${date.toLocaleString()}</span></div>`;
+          }
+          if (status.dataStoreStatus.database) {
+            html += `<div class="status-item"><span class="status-label">Database:</span><span class="status-value">${status.dataStoreStatus.database}</span></div>`;
+          }
+          if (status.dataStoreStatus.dbServer) {
+            html += `<div class="status-item"><span class="status-label">Server:</span><span class="status-value">${status.dataStoreStatus.dbServer}</span></div>`;
+          }
+          if (status.dataStoreStatus.dbPrefix) {
+            html += `<div class="status-item"><span class="status-label">Prefix:</span><span class="status-value">${status.dataStoreStatus.dbPrefix}</span></div>`;
+          }
+          if (status.dataStoreStatus.dbTable) {
+            html += `<div class="status-item"><span class="status-label">Table:</span><span class="status-value">${status.dataStoreStatus.dbTable}</span></div>`;
+          }
+          html += '</div>';
+        }
+        
+        // Big Segments
+        if (status.bigSegmentStatus) {
+          html += '<div class="status-section">';
+          html += '<h4>Big Segments</h4>';
+          html += `<div class="status-item"><span class="status-label">Available:</span><span class="${status.bigSegmentStatus.available ? 'status-ok' : 'status-error'}">${status.bigSegmentStatus.available ? 'Yes' : 'No'}</span></div>`;
+          html += `<div class="status-item"><span class="status-label">Potentially Stale:</span><span class="${status.bigSegmentStatus.potentiallyStale ? 'status-error' : 'status-ok'}">${status.bigSegmentStatus.potentiallyStale ? 'Yes' : 'No'}</span></div>`;
+          if (status.bigSegmentStatus.lastSynchronizedOn) {
+            const date = new Date(status.bigSegmentStatus.lastSynchronizedOn);
+            html += `<div class="status-item"><span class="status-label">Last Synchronized:</span><span class="status-value">${date.toLocaleString()}</span></div>`;
+          }
+          html += '</div>';
+        }
+        
+        // Environments
+        if (status.environments) {
+          for (const [envId, envStatus] of Object.entries(status.environments)) {
+            html += '<div class="status-section">';
+            html += `<h4>Environment: ${envStatus.envName || envId}</h4>`;
+            html += `<div class="status-item"><span class="status-label">Status:</span><span class="${envStatus.status === 'connected' ? 'status-ok' : 'status-error'}">${envStatus.status || 'unknown'}</span></div>`;
+            html += `<div class="status-item"><span class="status-label">SDK Key:</span><span class="status-value">${envId.substring(0, 20)}...</span></div>`;
+            
+            if (envStatus.connectionStatus) {
+              html += `<div class="status-item"><span class="status-label">Connection State:</span><span class="${envStatus.connectionStatus.state === 'VALID' ? 'status-ok' : (envStatus.connectionStatus.state === 'INITIALIZING' ? 'status-value' : 'status-error')}">${envStatus.connectionStatus.state || 'unknown'}</span></div>`;
+              if (envStatus.connectionStatus.stateSince) {
+                const date = new Date(envStatus.connectionStatus.stateSince);
+                html += `<div class="status-item"><span class="status-label">State Since:</span><span class="status-value">${date.toLocaleString()}</span></div>`;
+              }
+              if (envStatus.connectionStatus.lastError) {
+                html += `<div class="status-item"><span class="status-label">Last Error:</span><span class="status-error">${envStatus.connectionStatus.lastError.kind || 'unknown'}</span></div>`;
+                if (envStatus.connectionStatus.lastError.message) {
+                  html += `<div class="status-item"><span class="status-label">Error Message:</span><span class="status-value">${envStatus.connectionStatus.lastError.message}</span></div>`;
+                }
+              }
+            }
+            
+            // Data store status for this environment
+            if (envStatus.dataStoreStatus) {
+              html += `<div class="status-item"><span class="status-label">Data Store:</span><span class="${envStatus.dataStoreStatus.state === 'VALID' ? 'status-ok' : 'status-error'}">${envStatus.dataStoreStatus.state || 'unknown'}</span></div>`;
+              if (envStatus.dataStoreStatus.database) {
+                html += `<div class="status-item"><span class="status-label">Database:</span><span class="status-value">${envStatus.dataStoreStatus.database}</span></div>`;
+              }
+              if (envStatus.dataStoreStatus.dbPrefix) {
+                html += `<div class="status-item"><span class="status-label">DB Prefix:</span><span class="status-value">${envStatus.dataStoreStatus.dbPrefix}</span></div>`;
+              }
+            }
+            
+            // Big Segments for this environment
+            if (envStatus.bigSegmentStatus) {
+              html += `<div class="status-item"><span class="status-label">Big Segments Available:</span><span class="${envStatus.bigSegmentStatus.available ? 'status-ok' : 'status-error'}">${envStatus.bigSegmentStatus.available ? 'Yes' : 'No'}</span></div>`;
+              html += `<div class="status-item"><span class="status-label">Big Segments Stale:</span><span class="${envStatus.bigSegmentStatus.potentiallyStale ? 'status-error' : 'status-ok'}">${envStatus.bigSegmentStatus.potentiallyStale ? 'Yes' : 'No'}</span></div>`;
+            }
+            
+            html += '</div>';
+          }
+        }
+        
+        statusContent.innerHTML = html;
+        
+        // Fetch and update metrics
+        updateMetrics();
+        
+      } catch (error) {
+        console.error('Error fetching relay status:', error);
+        statusContent.innerHTML = '<div style="color: #f48771;">Failed to fetch relay proxy status</div>';
+      }
+    }
+    
+    async function updateMetrics() {
+      try {
+        const response = await fetch('/api/relay-metrics');
+        const metrics = await response.json();
+        
+        const metricsContent = document.getElementById('metricsContent');
+        if (metricsContent) {
+          if (metrics.error) {
+            metricsContent.innerHTML = `<div style="color: #f48771;">${metrics.error}</div>`;
+          } else {
+            let html = '';
+            html += `<div class="status-item"><span class="status-label">CPU Usage:</span><span class="status-value">${metrics.cpu.toFixed(2)}%</span></div>`;
+            html += `<div class="status-item"><span class="status-label">Memory Usage:</span><span class="status-value">${metrics.memory} (${metrics.memoryPercent.toFixed(2)}%)</span></div>`;
+            html += `<div class="status-item"><span class="status-label">Last Updated:</span><span class="status-value">${new Date(metrics.timestamp).toLocaleTimeString()}</span></div>`;
+            metricsContent.innerHTML = html;
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching metrics:', error);
+      }
+    }
+    
+    function closeStatusModal() {
+      const modal = document.getElementById('statusModal');
+      modal.classList.remove('show');
+    }
+    
+    // Load Test Modal
+    let loadTestEventSource = null;
+    
+    function openLoadTestModal() {
+      const modal = document.getElementById('loadTestModal');
+      modal.classList.add('show');
+    }
+    
+    function closeLoadTestModal() {
+      const modal = document.getElementById('loadTestModal');
+      modal.classList.remove('show');
+      
+      // Close SSE connection if running
+      if (loadTestEventSource) {
+        loadTestEventSource.close();
+        loadTestEventSource = null;
+      }
+      
+      // Reset button
+      const btn = document.getElementById('loadTestBtn');
+      btn.textContent = 'Start Load Test';
+      btn.disabled = false;
+    }
+    
+    async function startLoadTest() {
+      const clients = document.getElementById('loadTestClients').value;
+      const duration = document.getElementById('loadTestDuration').value;
+      const interval = document.getElementById('loadTestInterval').value;
+      const output = document.getElementById('loadTestOutput');
+      const btn = document.getElementById('loadTestBtn');
+      
+      // Disable button during test
+      btn.disabled = true;
+      btn.textContent = 'Running...';
+      
+      output.innerHTML = '<div style="color: #4ec9b0;">Starting load test...</div>';
+      
+      // Connect to SSE endpoint for real-time updates
+      loadTestEventSource = new EventSource(`/api/load-test/stream?clients=${clients}&duration=${duration}&interval=${interval}`);
+      
+      loadTestEventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'log') {
+          output.innerHTML += `<div style="color: #d4d4d4;">${data.message}</div>`;
+        } else if (data.type === 'stats') {
+          output.innerHTML += `<div style="color: #4ec9b0; margin-top: 10px;">${data.message}</div>`;
+        } else if (data.type === 'complete') {
+          output.innerHTML += `<div style="color: #4ec9b0; margin-top: 10px; font-weight: bold;">${data.message}</div>`;
+          loadTestEventSource.close();
+          loadTestEventSource = null;
+          btn.textContent = 'Start Load Test';
+          btn.disabled = false;
+        } else if (data.type === 'error') {
+          output.innerHTML += `<div style="color: #f48771; margin-top: 10px;">Error: ${data.message}</div>`;
+          loadTestEventSource.close();
+          loadTestEventSource = null;
+          btn.textContent = 'Start Load Test';
+          btn.disabled = false;
+        }
+        
+        // Auto-scroll to bottom
+        output.scrollTop = output.scrollHeight;
+      };
+      
+      loadTestEventSource.onerror = (error) => {
+        console.error('Load test SSE error:', error);
+        output.innerHTML += '<div style="color: #f48771;">Connection error</div>';
+        loadTestEventSource.close();
+        loadTestEventSource = null;
+        btn.textContent = 'Start Load Test';
+        btn.disabled = false;
+      };
+    }
+    
+    // Set up SSE connection for real-time message updates
+    let messageEventSource = null;
+    
+    function connectMessageStream() {
+      // Build query params for context
+      let url = '/api/message/stream';
+      if (currentContextType === 'custom' && customUserContext) {
+        const params = new URLSearchParams();
+        params.append('email', customUserContext.email);
+        if (customUserContext.name) params.append('name', customUserContext.name);
+        if (customUserContext.location) params.append('location', customUserContext.location);
+        url += '?' + params.toString();
+      } else if (currentContextType === 'anonymous' && userLocation) {
+        // Pass location for anonymous users too
+        const params = new URLSearchParams();
+        params.append('location', userLocation);
+        url += '?' + params.toString();
+      }
+      
+      messageEventSource = new EventSource(url);
+      
+      messageEventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        document.getElementById('message').textContent = data.message;
+      };
+      
+      messageEventSource.onerror = (error) => {
+        console.error('SSE connection error:', error);
+        messageEventSource.close();
+        // Reconnect after 5 seconds
+        setTimeout(connectMessageStream, 5000);
+      };
+    }
+    
+    function reconnectMessageStream() {
+      if (messageEventSource) {
+        messageEventSource.close();
+      }
+      connectMessageStream();
+    }
+    
+    // Start SSE connection
+    connectMessageStream();
+    
+    // Clear logs function - truncates the Docker container log file
+    async function clearLogs(elementId) {
+      const container = elementId === 'app-logs' ? 'app-dev' : 'relay-proxy';
+      
+      try {
+        document.getElementById(elementId).innerHTML = '<div class="log-line" style="color: #dcdcaa;">Clearing logs...</div>';
+        
+        const response = await fetch(`/api/logs/${container}/clear`, {
+          method: 'POST'
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+          document.getElementById(elementId).innerHTML = '<div class="log-line" style="color: #4ec9b0;">Logs cleared successfully.</div>';
+          // Refresh after a moment
+          setTimeout(() => {
+            fetchLogs(container, elementId);
+          }, 1000);
+        } else {
+          document.getElementById(elementId).innerHTML = `<div class="log-line log-error">Error: ${result.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error clearing logs:', error);
+        document.getElementById(elementId).innerHTML = '<div class="log-line log-error">Failed to clear logs</div>';
+      }
+    }
+    
+    // Fetch and display container logs
+    async function fetchLogs(container, elementId) {
+      try {
+        const response = await fetch(`/api/logs/${container}`);
+        const logs = await response.json();
+        const element = document.getElementById(elementId);
+        
+        if (logs.error) {
+          element.innerHTML = `<div class="log-line log-error">${logs.error}</div>`;
+          return;
+        }
+        
+        element.innerHTML = logs.lines.map(line => {
+          const timestamp = new Date().toLocaleTimeString();
+          let className = 'log-info';
+          if (line.toLowerCase().includes('error')) className = 'log-error';
+          if (line.toLowerCase().includes('warn')) className = 'log-warn';
+          
+          return `<div class="log-line ${className}"><span class="log-timestamp">[${timestamp}]</span>${line}</div>`;
+        }).join('');
+        
+        // Auto-scroll to bottom
+        element.scrollTop = element.scrollHeight;
+      } catch (error) {
+        console.error(`Error fetching ${container} logs:`, error);
+      }
+    }
+    
+    // Update logs every 2 seconds
+    setInterval(() => {
+      fetchLogs('app-dev', 'app-logs');
+      fetchLogs('relay-proxy', 'relay-logs');
+    }, 2000);
+    
+    // Initial load
+    detectLocation(); // Start location detection immediately
+    updateContextDisplay();
+    fetchLogs('app-dev', 'app-logs');
+    fetchLogs('relay-proxy', 'relay-logs');
+  </script>
+</body>
+</html>

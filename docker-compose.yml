@@ -1,0 +1,35 @@
+services:
+  app:
+    container_name: app-dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
+      - RELAY_PROXY_URL=http://relay-proxy:8030
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    user: root
+    networks:
+      - launchdarkly-network
+    depends_on:
+      - relay-proxy
+
+  relay-proxy:
+    container_name: relay-proxy
+    image: launchdarkly/ld-relay:8.16.4-static-debian12-nonroot-arm64v8
+    ports:
+      - "8030:8030"
+    environment:
+      - AUTO_CONFIG_KEY=${RELAY_PROXY_CONFIG_KEY}
+      - PORT=8030
+      - USE_EVENTS=true
+    networks:
+      - launchdarkly-network
+
+networks:
+  launchdarkly-network:
+    driver: bridge
