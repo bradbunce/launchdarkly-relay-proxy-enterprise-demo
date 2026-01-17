@@ -11,7 +11,7 @@
     }
     .main-container {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr;
       grid-template-rows: auto 1fr;
       gap: 20px;
       height: calc(100vh - 40px);
@@ -368,6 +368,14 @@
         <button class="clear-btn" onclick="clearLogs('relay-logs')">Clear</button>
       </div>
       <div class="console-output" id="relay-logs"></div>
+    </div>
+    
+    <div class="console-container">
+      <div class="console-header">
+        <span>redis monitor (live commands)</span>
+        <button class="clear-btn" onclick="clearRedisMonitor()">Clear</button>
+      </div>
+      <div class="console-output" id="redis-logs"></div>
     </div>
   </div>
 
@@ -895,7 +903,12 @@
     
     // Clear logs function - truncates the Docker container log file
     async function clearLogs(elementId) {
-      const container = elementId === 'app-logs' ? 'app-dev' : 'relay-proxy';
+      const containerMap = {
+        'app-logs': 'app-dev',
+        'relay-logs': 'relay-proxy',
+        'redis-logs': 'redis'
+      };
+      const container = containerMap[elementId];
       
       try {
         document.getElementById(elementId).innerHTML = '<div class="log-line" style="color: #dcdcaa;">Clearing logs...</div>';
@@ -954,11 +967,66 @@
       fetchLogs('relay-proxy', 'relay-logs');
     }, 2000);
     
+    // Redis Monitor SSE connection
+    let redisMonitorEventSource = null;
+    
+    function connectRedisMonitor() {
+      const redisLogsElement = document.getElementById('redis-logs');
+      
+      // Close existing connection if any
+      if (redisMonitorEventSource) {
+        redisMonitorEventSource.close();
+      }
+      
+      // Connect to Redis monitor SSE endpoint
+      redisMonitorEventSource = new EventSource('/api/redis/monitor');
+      
+      redisMonitorEventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        const timestamp = new Date().toLocaleTimeString();
+        
+        let className = 'log-info';
+        if (data.type === 'error') className = 'log-error';
+        if (data.type === 'command') className = 'log-info';
+        
+        const logLine = document.createElement('div');
+        logLine.className = `log-line ${className}`;
+        logLine.innerHTML = `<span class="log-timestamp">[${timestamp}]</span>${data.message}`;
+        
+        redisLogsElement.appendChild(logLine);
+        
+        // Keep only last 100 lines
+        while (redisLogsElement.children.length > 100) {
+          redisLogsElement.removeChild(redisLogsElement.firstChild);
+        }
+        
+        // Auto-scroll to bottom
+        redisLogsElement.scrollTop = redisLogsElement.scrollHeight;
+      };
+      
+      redisMonitorEventSource.onerror = (error) => {
+        console.error('Redis monitor SSE error:', error);
+        const timestamp = new Date().toLocaleTimeString();
+        redisLogsElement.innerHTML += `<div class="log-line log-error"><span class="log-timestamp">[${timestamp}]</span>Monitor connection error. Reconnecting...</div>`;
+        
+        // Reconnect after 5 seconds
+        setTimeout(() => {
+          connectRedisMonitor();
+        }, 5000);
+      };
+    }
+    
+    function clearRedisMonitor() {
+      const redisLogsElement = document.getElementById('redis-logs');
+      redisLogsElement.innerHTML = '<div class="log-line" style="color: #4ec9b0;">Monitor cleared. Watching for new commands...</div>';
+    }
+    
     // Initial load
     detectLocation(); // Start location detection immediately
     updateContextDisplay();
     fetchLogs('app-dev', 'app-logs');
     fetchLogs('relay-proxy', 'relay-logs');
+    connectRedisMonitor(); // Start Redis monitor stream
   </script>
 </body>
 </html>

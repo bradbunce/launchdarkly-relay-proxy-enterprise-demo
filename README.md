@@ -15,6 +15,7 @@ A comprehensive demonstration application showcasing the LaunchDarkly Node.js se
 - **Interactive UI**: Modern web interface with LaunchDarkly branding
 - **Context Management**: Switch between anonymous and custom user contexts
 - **Live Container Logs**: Real-time viewing of app and relay proxy logs
+- **Redis Monitor**: Live stream of all Redis commands showing feature flag operations
 - **Relay Proxy Status**: Comprehensive status dashboard with health checks
 - **Performance Metrics**: Real-time CPU and memory monitoring
 - **Load Testing**: Built-in load testing tool with live results
@@ -120,11 +121,12 @@ The application uses Server-Sent Events (SSE) to push flag changes instantly:
 
 ### Container Logs
 
-View real-time logs from both containers:
+View real-time logs from containers:
 - **app-dev**: Application and SDK logs
 - **relay-proxy**: Relay proxy connection and event logs
-- **Clear button**: Truncates container logs
-- **Auto-refresh**: Updates every 2 seconds
+- **redis monitor**: Live Redis commands showing all operations in real-time
+- **Clear button**: Truncates container logs or clears monitor display
+- **Auto-refresh**: Updates every 2 seconds (logs) or streams live (Redis monitor)
 
 ### Relay Proxy Status
 
@@ -181,11 +183,123 @@ Built-in load testing tool to measure relay proxy performance:
 - LaunchDarkly Relay Proxy v8.16.4
 - AutoConfig mode
 - Event forwarding enabled
+- Redis integration for persistent storage
 - Port: 8030
+
+**redis** (Redis Container):
+- Redis 7 Alpine
+- Persistent data store for feature flags
+- AOF (Append-Only File) persistence enabled
+- Health checks every 5 seconds
+- Port: 6379 (exposed for local development/testing)
+- Volume: redis-data for persistent storage
 
 ### Network
 
-Both containers communicate via a custom Docker bridge network (`launchdarkly-network`).
+All containers (app, relay-proxy, redis) communicate via a custom Docker bridge network (`launchdarkly-network`).
+
+### Redis Integration
+
+The relay proxy uses Redis as a persistent data store for caching feature flag configurations. This architecture provides flexibility in how SDK clients retrieve feature flag data.
+
+**Architecture Options:**
+
+1. **SDK → Relay Proxy → Redis** (Current Configuration):
+   - SDK clients connect to the Relay Proxy via HTTP
+   - Relay Proxy fetches from Redis cache or LaunchDarkly API
+   - Best for: Multiple SDK clients, centralized caching, HTTP-based access
+
+2. **SDK → Redis** (Alternative Configuration):
+   - SDK clients can be configured to read directly from Redis
+   - Bypasses Relay Proxy for flag evaluation
+   - Best for: High-performance scenarios, reduced network hops, direct cache access
+
+**Benefits of Redis Integration:**
+
+**Data Persistence**: Feature flag data persists across container restarts, reducing initialization time and API calls to LaunchDarkly.
+
+**Persistence Mechanism**: Redis uses AOF (Append-Only File) persistence, which logs every write operation to disk. The data is stored in a Docker volume (`redis-data`) that survives container removal and recreation.
+
+**Relay Proxy Configuration**: The relay proxy is configured with:
+- `USE_REDIS=1` - Enables Redis as the persistent store
+- `REDIS_URL=redis://redis:6379` - Connection string using internal hostname
+- `ENV_DATASTORE_PREFIX=ld-flags-'$CID'` - Prefix for environment-specific keys
+
+**SDK Configuration Options:**
+
+The LaunchDarkly SDK can be configured to use Redis directly as a feature store:
+
+```javascript
+// Option 1: Via Relay Proxy (current demo configuration)
+const client = LD.init(sdkKey, {
+  baseUri: 'http://relay-proxy:8030',
+  streamUri: 'http://relay-proxy:8030',
+  eventsUri: 'http://relay-proxy:8030'
+});
+
+// Option 2: Direct Redis access (requires Redis feature store)
+const RedisFeatureStore = require('launchdarkly-node-server-sdk/integrations').Redis;
+const client = LD.init(sdkKey, {
+  featureStore: RedisFeatureStore({
+    redisOpts: { host: 'redis', port: 6379 },
+    prefix: 'ld-flags',
+    cacheTTL: 30
+  })
+});
+```
+
+**Automatic Configuration**: The relay proxy automatically discovers and caches all environments configured via the `AUTO_CONFIG_KEY`, storing each environment's data separately in Redis with environment-specific prefixes.
+
+**Live Monitoring**: The UI includes a Redis monitor console that streams all Redis commands in real-time using `redis-cli MONITOR`. This allows you to watch:
+- GET/SET operations for feature flag data
+- Key operations when flags are updated
+- Connection health checks (PING commands every 5 seconds)
+- All other Redis operations in the system
+
+**Data Structure**: Feature flags are stored in Redis with keys like:
+- `ld-flags-'<environment-id>':features` - Feature flag configurations
+- `ld-flags-'<environment-id>':segments` - User segment definitions
+- `ld-flags-'<environment-id>':$inited` - Initialization markers
+
+### Verifying Redis Connectivity
+
+To verify Redis is working correctly:
+
+```bash
+# Check Redis container is running and healthy
+docker-compose ps redis
+
+# View Redis logs
+docker-compose logs redis
+
+# Connect to Redis CLI and check stored data
+docker exec redis redis-cli KEYS "*"
+
+# Check specific feature flag data
+docker exec redis redis-cli GET "ld-flags-'<environment-id>':features"
+
+# Monitor Redis commands in real-time (also available in UI)
+docker exec redis redis-cli MONITOR
+
+# Check relay proxy logs for Redis connection
+docker-compose logs relay-proxy | grep -i redis
+
+# Verify data persistence
+# 1. Let services run for a minute to cache data
+# 2. Check data exists: docker exec redis redis-cli KEYS "*"
+# 3. Restart Redis: docker-compose restart redis
+# 4. Wait for Redis to be healthy: docker-compose ps redis
+# 5. Verify data persists: docker exec redis redis-cli KEYS "*"
+```
+
+**Using the UI Redis Monitor:**
+
+The application UI includes a live Redis monitor console that shows all Redis commands in real-time:
+1. Open http://localhost:3000
+2. Look at the rightmost console panel labeled "redis monitor (live commands)"
+3. Watch as commands stream in real-time
+4. Trigger activity by refreshing the page or changing user context
+5. Click "Clear" to reset the monitor display
 
 ### SDK Configuration
 
@@ -284,6 +398,63 @@ node load-test.js --clients 50 --duration 120 --interval 500
 ```
 
 ## Troubleshooting
+
+### Redis Connection Issues
+
+**Symptom**: Relay proxy logs show "Failed to connect to Redis" or similar errors
+
+**Causes**:
+- Redis container not running
+- Redis container not healthy
+- Network connectivity issues between containers
+
+**Solutions**:
+```bash
+# Check Redis container status
+docker-compose ps redis
+
+# View Redis logs for errors
+docker-compose logs redis
+
+# Restart Redis container
+docker-compose restart redis
+
+# Verify Redis is on the correct network
+docker network inspect launchdarkly-network
+
+# Test connectivity from relay-proxy to redis
+docker exec relay-proxy ping redis
+
+# If Redis won't start, check volume permissions
+docker volume inspect redis-data
+```
+
+### Redis Data Persistence Issues
+
+**Symptom**: Feature flag data is lost after Redis restart
+
+**Causes**:
+- AOF persistence not enabled
+- Volume not properly mounted
+- Disk space issues
+
+**Solutions**:
+```bash
+# Verify AOF is enabled
+docker exec redis redis-cli CONFIG GET appendonly
+
+# Check volume is mounted
+docker inspect redis | grep -A 5 Mounts
+
+# Check disk space
+df -h
+
+# Verify data directory exists in container
+docker exec redis ls -la /data
+
+# If data is corrupted, repair AOF file
+docker exec redis redis-check-aof --fix /data/appendonly.aof
+```
 
 ### SDK Initialization Timeout
 

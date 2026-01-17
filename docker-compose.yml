@@ -27,9 +27,35 @@ services:
       - AUTO_CONFIG_KEY=${RELAY_PROXY_CONFIG_KEY}
       - PORT=8030
       - USE_EVENTS=true
+      - USE_REDIS=1
+      - REDIS_URL=redis://redis:6379
+      - ENV_DATASTORE_PREFIX=ld-flags-'$$CID'
     networks:
       - launchdarkly-network
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    container_name: redis
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - launchdarkly-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 networks:
   launchdarkly-network:
     driver: bridge
+
+volumes:
+  redis-data:
+    driver: local

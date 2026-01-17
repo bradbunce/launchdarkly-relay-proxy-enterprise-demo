@@ -390,7 +390,7 @@ function createApp() {
   // API endpoint to fetch container logs
   app.get('/api/logs/:container', async (req, res) => {
     const { container } = req.params;
-    const allowedContainers = ['app-dev', 'relay-proxy'];
+    const allowedContainers = ['app-dev', 'relay-proxy', 'redis'];
     
     if (!allowedContainers.includes(container)) {
       return res.status(400).json({ error: 'Invalid container name' });
@@ -409,10 +409,59 @@ function createApp() {
     }
   });
 
+  // API endpoint to get Redis monitor stream
+  app.get('/api/redis/monitor', (req, res) => {
+    // Set headers for SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    
+    try {
+      // Start redis-cli MONITOR in the redis container
+      const { spawn } = require('child_process');
+      const monitor = spawn('docker', ['exec', 'redis', 'redis-cli', 'MONITOR']);
+      
+      // Send initial connection message
+      res.write(`data: ${JSON.stringify({ type: 'info', message: 'Connected to Redis MONITOR' })}\n\n`);
+      
+      // Stream stdout
+      monitor.stdout.on('data', (data) => {
+        const lines = data.toString().split('\n').filter(line => line.trim());
+        lines.forEach(line => {
+          res.write(`data: ${JSON.stringify({ type: 'command', message: line })}\n\n`);
+        });
+      });
+      
+      // Stream stderr
+      monitor.stderr.on('data', (data) => {
+        const lines = data.toString().split('\n').filter(line => line.trim());
+        lines.forEach(line => {
+          res.write(`data: ${JSON.stringify({ type: 'error', message: line })}\n\n`);
+        });
+      });
+      
+      // Handle monitor process exit
+      monitor.on('close', (code) => {
+        res.write(`data: ${JSON.stringify({ type: 'info', message: `Monitor disconnected (code ${code})` })}\n\n`);
+        res.end();
+      });
+      
+      // Clean up on client disconnect
+      req.on('close', () => {
+        monitor.kill();
+      });
+      
+    } catch (error) {
+      console.error('Error starting Redis monitor:', error);
+      res.write(`data: ${JSON.stringify({ type: 'error', message: `Failed to start monitor: ${error.message}` })}\n\n`);
+      res.end();
+    }
+  });
+
   // API endpoint to clear container logs
   app.post('/api/logs/:container/clear', async (req, res) => {
     const { container } = req.params;
-    const allowedContainers = ['app-dev', 'relay-proxy'];
+    const allowedContainers = ['app-dev', 'relay-proxy', 'redis'];
     
     if (!allowedContainers.includes(container)) {
       return res.status(400).json({ error: 'Invalid container name' });

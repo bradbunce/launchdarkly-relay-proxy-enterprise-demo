@@ -91,6 +91,7 @@ async function initializeLaunchDarkly(config) {
     
     // Return the client even though initialization timed out
     // It will continue retrying in the background
+    // However, if client creation itself failed (e.g., invalid URL), return null
     return ldClientInstance;
   }
 }
