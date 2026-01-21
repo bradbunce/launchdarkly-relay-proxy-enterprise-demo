@@ -1,4 +1,5 @@
 const LD = require('@launchdarkly/node-server-sdk');
+const { RedisFeatureStore } = require('@launchdarkly/node-server-sdk-redis');
 
 // Singleton instance
 let ldClientInstance = null;
@@ -10,6 +11,10 @@ let initializationError = null;
  * @param {Object} config - LaunchDarkly configuration object
  * @param {string} config.sdkKey - LaunchDarkly SDK key
  * @param {string} config.relayProxyUrl - Relay proxy URL
+ * @param {boolean} config.useDaemonMode - Whether to use daemon mode with Redis
+ * @param {string} config.redisHost - Redis host (for daemon mode)
+ * @param {number} config.redisPort - Redis port (for daemon mode)
+ * @param {string} config.redisPrefix - Redis key prefix (for daemon mode)
  * @returns {Promise<Object>} Initialized LaunchDarkly client or null on failure
  */
 async function initializeLaunchDarkly(config) {
@@ -19,7 +24,7 @@ async function initializeLaunchDarkly(config) {
     return ldClientInstance;
   }
 
-  const { sdkKey, relayProxyUrl } = config;
+  const { sdkKey, relayProxyUrl, useDaemonMode, redisHost, redisPort, redisPrefix } = config;
 
   // Validate SDK key
   if (!sdkKey) {
@@ -30,15 +35,44 @@ async function initializeLaunchDarkly(config) {
   }
 
   try {
-    console.log('Initializing LaunchDarkly SDK...');
-    console.log(`Relay Proxy URL: ${relayProxyUrl}`);
+    let ldConfig = {};
+    
+    if (useDaemonMode) {
+      console.log('Initializing LaunchDarkly SDK in Daemon Mode (Redis + Events)...');
+      console.log(`Redis: ${redisHost}:${redisPort}`);
+      console.log(`Redis Prefix: ${redisPrefix || 'ld'}`);
+      console.log(`Relay Proxy URL (for events): ${relayProxyUrl}`);
+      
+      // Configure SDK with Redis feature store using redisOpts
+      ldConfig = {
+        featureStore: RedisFeatureStore({
+          redisOpts: {
+            host: redisHost || 'redis',
+            port: redisPort || 6379
+          },
+          prefix: redisPrefix || 'ld',
+          cacheTTL: 30
+        }),
+        sendEvents: true,
+        baseUri: relayProxyUrl,
+        streamUri: relayProxyUrl,
+        eventsUri: relayProxyUrl,
+        useLdd: false
+      };
+    } else {
+      console.log('Initializing LaunchDarkly SDK in Relay Proxy Mode...');
+      console.log(`Relay Proxy URL: ${relayProxyUrl}`);
+      
+      // Standard relay proxy configuration
+      ldConfig = {
+        baseUri: relayProxyUrl,
+        streamUri: relayProxyUrl,
+        eventsUri: relayProxyUrl
+      };
+    }
 
-    // Initialize SDK with relay proxy configuration
-    const client = LD.init(sdkKey, {
-      baseUri: relayProxyUrl,
-      streamUri: relayProxyUrl,
-      eventsUri: relayProxyUrl
-    });
+    // Initialize SDK
+    const client = LD.init(sdkKey, ldConfig);
 
     // Store the client immediately so it can recover from connection issues
     ldClientInstance = client;

@@ -105,10 +105,11 @@ dist
 *.swo
 *~
 
-# Kiro AI assistant files
+# Kiro AI assistant files (optional - remove if you want to commit specs)
 .kiro/
 
-# Test files
-*.test.js
-jest.config.js
-docker.test.js
+# PHP temporary files
+php/vendor/
+php/composer.lock
+/tmp/
+*.tmp

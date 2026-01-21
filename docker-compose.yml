@@ -10,6 +10,10 @@ services:
       - PORT=3000
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
       - RELAY_PROXY_URL=http://relay-proxy:8030
+      - USE_DAEMON_MODE=${USE_DAEMON_MODE:-false}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PREFIX=${REDIS_PREFIX:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     user: root
@@ -51,6 +55,26 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  php:
+    container_name: php-app-dev
+    build:
+      context: ./php
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    environment:
+      - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PREFIX=${REDIS_PREFIX:-}
+      - RELAY_PROXY_URL=http://relay-proxy:8030
+      - USE_DAEMON_MODE=${USE_DAEMON_MODE:-false}
+    networks:
+      - launchdarkly-network
+    depends_on:
+      redis:
+        condition: service_healthy
 
 networks:
   launchdarkly-network:

@@ -200,6 +200,25 @@ function createApp() {
     }
   });
 
+  // API endpoint to get SDK configuration
+  app.get('/api/sdk-config', (req, res) => {
+    // Read directly from environment to avoid caching
+    const useDaemonMode = process.env.USE_DAEMON_MODE === 'true';
+    const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
+    const redisHost = process.env.REDIS_HOST || 'redis';
+    const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
+    const redisPrefix = process.env.REDIS_PREFIX || null;
+    
+    res.json({
+      mode: useDaemonMode ? 'Daemon Mode (Redis + Events)' : 'Relay Proxy Mode',
+      useDaemonMode: useDaemonMode,
+      relayProxyUrl: relayProxyUrl,
+      redisHost: useDaemonMode ? redisHost : null,
+      redisPort: useDaemonMode ? redisPort : null,
+      redisPrefix: useDaemonMode ? redisPrefix : null
+    });
+  });
+
   // API endpoint to get relay proxy status
   app.get('/api/relay-status', async (req, res) => {
     try {
