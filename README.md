@@ -29,14 +29,9 @@ A comprehensive demonstration application showcasing the LaunchDarkly Node.js se
 
 ## Prerequisites
 
-### Required
 - **Docker**: Version 20.10 or higher
 - **Docker Compose**: Version 2.0 or higher
 - **LaunchDarkly Account**: With SDK key and Relay Proxy configuration key
-
-### Optional (for local development)
-- **Node.js**: Version 24 or higher
-- **npm**: Version 8 or higher
 
 ## Quick Start
 
@@ -229,7 +224,7 @@ Built-in load testing tool to measure relay proxy performance:
 - Persistent data store for feature flags
 - AOF (Append-Only File) persistence enabled
 - Health checks every 5 seconds
-- Port: 6379 (exposed for local development/testing)
+- Port: 6379 (internal Docker network)
 - Volume: redis-data for persistent storage
 
 ### Network
@@ -731,47 +726,6 @@ launchdarkly-relay-proxy-enterprise-demo/
 └── public/
     ├── index.html       # Web UI
     └── launchdarkly-logo.svg  # LaunchDarkly logo
-```
-
-## Development
-
-### Local Development
-
-```bash
-# Install dependencies
-npm install
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your credentials
-
-# Start the application
-npm start
-
-# Or use nodemon for hot-reloading
-npm run dev
-```
-
-### Available Scripts
-
-- `npm start` - Start the application
-- `npm run dev` - Start with hot-reloading (nodemon)
-- `npm test` - Run test suite
-- `npm run load-test` - Run standalone load test
-- `npm run docker:build` - Build Docker images
-- `npm run docker:up` - Start Docker services
-- `npm run docker:down` - Stop Docker services
-
-### Standalone Load Testing
-
-Run load tests from the command line:
-
-```bash
-# Basic usage (10 clients, 60 seconds)
-npm run load-test
-
-# Custom parameters
-node load-test.js --clients 50 --duration 120 --interval 500
 ```
 
 ## Troubleshooting
