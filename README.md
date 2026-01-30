@@ -78,11 +78,11 @@ docker-compose up -d
 # View logs
 docker-compose logs -f
 
-# Access the applications
-# Dashboard UI: http://localhost:8000
-# Node.js app: http://localhost:3000
-# API service: http://localhost:4000
-# PHP app: http://localhost:8080
+# Access the application
+# Dashboard UI: http://localhost:8000 (main interface)
+# Node.js API: http://localhost:3000 (backend only)
+# API service: http://localhost:4000 (backend only)
+# PHP API: http://localhost:8080 (backend only)
 ```
 
 ### 4. Changing Configuration
@@ -298,13 +298,13 @@ This demo showcases SDK integration with a shared Redis backend, with each appli
 - All SDK traffic goes through the Relay Proxy
 - Receives real-time flag updates via streaming
 - Sends analytics events through the Relay Proxy
-- Accessible at http://localhost:3000
+- Backend API accessible at http://localhost:3000
 
 **PHP Application** (Daemon Mode only):
 - Reads flags directly from Redis for high-performance evaluation
 - Sends analytics events through the Relay Proxy
 - No direct LaunchDarkly API connections for flag evaluation
-- Accessible at http://localhost:8080
+- Backend API accessible at http://localhost:8080
 
 Both applications:
 - Evaluate the same feature flags from the shared Redis store
@@ -464,7 +464,7 @@ docker-compose logs relay-proxy | grep -i redis
 **Using the UI Redis Monitor:**
 
 The application UI includes a live Redis monitor console that shows all Redis commands in real-time:
-1. Open http://localhost:3000
+1. Open the dashboard at http://localhost:8000
 2. Look at the rightmost console panel labeled "redis monitor (live commands)"
 3. Watch as commands stream in real-time
 4. Trigger activity by refreshing the page or changing user context
@@ -634,9 +634,11 @@ The PHP application demonstrates daemon mode by reading feature flags from the s
 
 ### Accessing the PHP Application
 
-Once the services are running, access the PHP application at:
+Once the services are running, access the PHP backend API at:
 
 **URL**: http://localhost:8080
+
+**Note**: The unified dashboard at http://localhost:8000 provides a visual interface for both Node.js and PHP services. The PHP API at port 8080 is primarily for backend operations and testing.
 
 The PHP application displays:
 - Current value of the `user-message` feature flag
