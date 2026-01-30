@@ -88,27 +88,30 @@ describe('README PHP Daemon Mode Documentation Completeness Unit Tests', () => {
 
   /**
    * Requirements: 9.5
-   * Test README documents shared Redis architecture
+   * Test README documents Redis architecture for PHP
    */
-  test('README documents shared Redis architecture', () => {
-    // Check for shared Redis architecture explanation
-    const hasSharedArchitecture = 
-      (readmeContent.includes('shared') && readmeContent.includes('Redis')) ||
-      (readmeContent.includes('both') && readmeContent.includes('Redis') && 
-       (readmeContent.includes('Node') || readmeContent.includes('PHP')));
-    expect(hasSharedArchitecture).toBe(true);
+  test('README documents Redis architecture for PHP daemon mode', () => {
+    // Check for Redis architecture explanation with PHP
+    const hasRedisArchitecture = 
+      (readmeContent.includes('Redis') && readmeContent.includes('PHP')) ||
+      (readmeContent.includes('daemon') && readmeContent.includes('Redis'));
+    expect(hasRedisArchitecture).toBe(true);
   });
 
   /**
    * Requirements: 9.5
-   * Test README documents both Node.js and PHP SDKs using Redis
+   * Test README documents PHP SDK using Redis (not Node.js)
    */
-  test('README documents both Node.js and PHP SDKs using Redis', () => {
-    // Check that both Node.js and PHP are mentioned with Redis
-    const hasNodeJs = readmeContent.includes('Node.js') || readmeContent.includes('Node');
+  test('README documents PHP SDK using Redis', () => {
+    // Check that PHP is mentioned with Redis
     const hasPhp = readmeContent.includes('PHP') || readmeContent.includes('php');
     const hasRedis = readmeContent.includes('Redis') || readmeContent.includes('redis');
-    expect(hasNodeJs && hasPhp && hasRedis).toBe(true);
+    
+    // Verify PHP and Redis are both mentioned
+    expect(hasPhp && hasRedis).toBe(true);
+    
+    // Note: Node.js uses Relay Proxy mode, not Redis directly
+    // This test verifies PHP uses Redis for daemon mode
   });
 
   /**

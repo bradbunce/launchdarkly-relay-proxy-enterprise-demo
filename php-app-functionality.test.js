@@ -23,10 +23,10 @@ describe('PHP Application Functionality Unit Tests', () => {
    * Test index.php creates user context
    */
   test('index.php creates user context', () => {
-    // Check for user context creation
+    // Check for user context creation using builder pattern
     expect(indexPhpContent).toMatch(/\$context\s*=/);
-    expect(indexPhpContent).toMatch(/'kind'\s*=>\s*'user'/);
-    expect(indexPhpContent).toMatch(/'key'/);
+    expect(indexPhpContent).toMatch(/LDContext::builder/);
+    expect(indexPhpContent).toMatch(/->kind\('user'\)/);
   });
 
   /**

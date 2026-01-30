@@ -134,7 +134,7 @@ describe('PHP Service Docker Compose Configuration Unit Tests', () => {
    */
   test('PHP service has container_name set', () => {
     expect(dockerComposeConfig.services.php).toHaveProperty('container_name');
-    expect(dockerComposeConfig.services.php.container_name).toBe('php-app');
+    expect(dockerComposeConfig.services.php.container_name).toBe('php-app-dev');
   });
 
   /**

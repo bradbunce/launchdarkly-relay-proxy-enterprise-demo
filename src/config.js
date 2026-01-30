@@ -24,17 +24,11 @@ function getConfig(key, defaultValue = null, required = false) {
  * @returns {Object} Configuration object
  */
 function loadConfig() {
-  const useDaemonMode = getConfig('USE_DAEMON_MODE', 'false', false) === 'true';
-  
   const config = {
     // LaunchDarkly SDK configuration
     launchDarkly: {
       sdkKey: getConfig('LAUNCHDARKLY_SDK_KEY', null, false),
-      relayProxyUrl: getConfig('RELAY_PROXY_URL', 'http://relay-proxy:8030', false),
-      useDaemonMode: useDaemonMode,
-      redisHost: getConfig('REDIS_HOST', 'redis', false),
-      redisPort: parseInt(getConfig('REDIS_PORT', '6379', false), 10),
-      redisPrefix: getConfig('REDIS_PREFIX', null, false)
+      relayProxyUrl: getConfig('RELAY_PROXY_URL', 'http://relay-proxy:8030', false)
     },
     
     // Application configuration
@@ -51,12 +45,8 @@ function loadConfig() {
   // Log configuration (without sensitive values)
   console.log('Configuration loaded:');
   console.log(`  Port: ${config.app.port}`);
-  console.log(`  SDK Mode: ${useDaemonMode ? 'Daemon Mode (Redis + Events)' : 'Relay Proxy Mode'}`);
+  console.log(`  Node.js SDK: Relay Proxy Mode`);
   console.log(`  Relay Proxy URL: ${config.launchDarkly.relayProxyUrl}`);
-  if (useDaemonMode) {
-    console.log(`  Redis: ${config.launchDarkly.redisHost}:${config.launchDarkly.redisPort}`);
-    console.log(`  Redis Prefix: ${config.launchDarkly.redisPrefix || 'ld'}`);
-  }
   console.log(`  SDK Key: ${config.launchDarkly.sdkKey ? '[SET]' : '[NOT SET]'}`);
 
   return config;

@@ -55,10 +55,6 @@ RELAY_PROXY_CONFIG_KEY=rel-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 Optional configuration:
 ```env
-# Set to 'true' for daemon mode (reads flags from Redis, sends events via Relay Proxy)
-# Set to 'false' for relay proxy mode (all SDK traffic through Relay Proxy)
-USE_DAEMON_MODE=false
-
 # Redis prefix (must match your environment ID from LaunchDarkly)
 REDIS_PREFIX=ld-flags-'your-environment-id'
 ```
@@ -83,7 +79,9 @@ docker-compose up -d
 docker-compose logs -f
 
 # Access the applications
+# Dashboard UI: http://localhost:8000
 # Node.js app: http://localhost:3000
+# API service: http://localhost:4000
 # PHP app: http://localhost:8080
 ```
 
@@ -174,43 +172,91 @@ Comprehensive status dashboard showing:
 
 ### Load Testing
 
-Built-in load testing tool to measure relay proxy performance:
+Built-in load testing tool to measure SDK performance for both Node.js and PHP applications:
 
 **Configuration:**
-- Number of clients (1-100)
-- Test duration (5-300 seconds)
-- Evaluation interval (100-10000ms)
+- Target Service: Node.js (Relay Proxy Mode) or PHP (Daemon Mode)
+- Number of Requests: 1-1000 total flag evaluations
+- Concurrency: 1-100 simultaneous requests
 
 **Metrics:**
-- Total evaluations
-- Success rate
-- Min/max/average latency
-- Throughput (evaluations per second)
+- Total requests completed
+- Successful evaluations
+- Failed evaluations
+- Average response time (milliseconds)
+- Requests per second (throughput)
 
-**Real-time Output:**
-- Live progress updates
-- Stats every 5 seconds
-- Final summary report
+**Performance Comparison:**
+- **Node.js (Relay Proxy Mode)**: ~10-50ms average latency, moderate throughput
+  - Evaluates flags through Relay Proxy over HTTP
+  - Demonstrates real-world network latency
+  - Suitable for interactive applications
+  
+- **PHP (Daemon Mode)**: <1ms average latency, very high throughput (4000+ req/sec)
+  - Reads flags directly from Redis
+  - Minimal latency, maximum performance
+  - Ideal for high-throughput scenarios
+
+**How to Use:**
+1. Open the dashboard at http://localhost:8000
+2. Scroll to the "Relay Proxy Load Test" panel
+3. Select target service (Node.js or PHP)
+4. Configure number of requests and concurrency level
+5. Click "Start Test" to begin
+6. View real-time results in the output panel
+
+**Example Results:**
+```
+Node.js Load Test:
+Total Requests: 100
+Successful: 100
+Failed: 0
+Average Response Time: 15.23ms
+Requests/sec: 250.45
+
+PHP Load Test:
+Total Requests: 100
+Successful: 100
+Failed: 0
+Average Response Time: 0.23ms
+Requests/sec: 4118.44
+```
 
 ## Architecture
 
-### Containers
+### 6-Container Architecture
 
-**app-dev** (Application Container):
+This application uses a microservices architecture with six specialized containers:
+
+**dashboard** (Dashboard UI Container):
+- Nginx Alpine
+- Serves static web UI (HTML, CSS, JavaScript)
+- Port: 8000
+- Purpose: User interface for monitoring and demonstration
+
+**api-service** (API Service Container):
+- Node.js 18 Alpine
+- Express web server
+- Centralized API gateway for status checks and operations
+- Docker CLI for container management
+- Port: 4000
+- Purpose: Cross-service communication and monitoring
+
+**app-dev** (Node.js Application Container):
 - Node.js 24 Alpine
 - Express web server
 - LaunchDarkly SDK v9.10.5
-- Docker CLI for log access
+- **Fixed Mode**: Relay Proxy Mode only
 - Port: 3000
+- Purpose: LaunchDarkly Node.js SDK demonstration
 
 **php-app-dev** (PHP Application Container):
 - PHP 8.3-FPM Alpine
 - Nginx web server
 - LaunchDarkly PHP SDK v6.4+
-- Supports two modes:
-  - **Daemon Mode**: Reads flags from Redis, sends events via Relay Proxy
-  - **Relay Proxy Mode**: All SDK traffic through Relay Proxy
+- **Fixed Mode**: Daemon Mode (Redis + Events) only
 - Port: 8080
+- Purpose: LaunchDarkly PHP SDK demonstration
 
 **relay-proxy** (Relay Proxy Container):
 - LaunchDarkly Relay Proxy v8.16.4
@@ -218,6 +264,7 @@ Built-in load testing tool to measure relay proxy performance:
 - Event forwarding enabled
 - Redis integration for persistent storage
 - Port: 8030
+- Purpose: Feature flag caching and event forwarding
 
 **redis** (Redis Container):
 - Redis 7 Alpine
@@ -226,48 +273,117 @@ Built-in load testing tool to measure relay proxy performance:
 - Health checks every 5 seconds
 - Port: 6379 (internal Docker network)
 - Volume: redis-data for persistent storage
+- Purpose: Shared data store for feature flags
+
+### Port Mappings
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| Dashboard | 8000 | Web UI access |
+| API Service | 4000 | API endpoints for status and operations |
+| Node.js App | 3000 | SDK demonstration endpoints |
+| PHP App | 8080 | PHP SDK demonstration |
+| Relay Proxy | 8030 | LaunchDarkly Relay Proxy |
+| Redis | 6379 | Internal only (no external port) |
 
 ### Network
 
-All containers (app, relay-proxy, redis, php) communicate via a custom Docker bridge network (`launchdarkly-network`).
+All containers communicate via a custom Docker bridge network (`launchdarkly-network`).
 
 ### Multi-Language SDK Integration
 
-This demo showcases SDK integration with a shared Redis backend, with both applications supporting configurable modes:
+This demo showcases SDK integration with a shared Redis backend, with each application using a distinct, optimized integration pattern:
 
-**Node.js Application**:
-- **Relay Proxy Mode** (`USE_DAEMON_MODE=false`, default): All SDK traffic through Relay Proxy
-- **Daemon Mode** (`USE_DAEMON_MODE=true`): Reads flags from Redis, sends events via Relay Proxy
+**Node.js Application** (Relay Proxy Mode only):
+- All SDK traffic goes through the Relay Proxy
+- Receives real-time flag updates via streaming
+- Sends analytics events through the Relay Proxy
 - Accessible at http://localhost:3000
 
-**PHP Application**:
-- **Relay Proxy Mode** (`USE_DAEMON_MODE=false`, default): All SDK traffic through Relay Proxy
-- **Daemon Mode** (`USE_DAEMON_MODE=true`): Reads flags from Redis, sends events via Relay Proxy
+**PHP Application** (Daemon Mode only):
+- Reads flags directly from Redis for high-performance evaluation
+- Sends analytics events through the Relay Proxy
+- No direct LaunchDarkly API connections for flag evaluation
 - Accessible at http://localhost:8080
 
 Both applications:
 - Evaluate the same feature flags from the shared Redis store
 - Send analytics events to LaunchDarkly through the Relay Proxy
-- Can be switched between modes using the `USE_DAEMON_MODE` environment variable
 - Demonstrate how multiple SDKs in different languages work together in a unified architecture
+
+### API Service Endpoints
+
+The API service provides centralized endpoints for monitoring and operations:
+
+**Status Endpoints:**
+- `GET /api/relay-status` - Relay Proxy connection status
+- `GET /api/redis/status` - Redis connectivity check
+- `GET /api/node/status` - Node.js application status
+- `GET /api/php/status` - PHP application status
+
+**Operations Endpoints:**
+- `GET /api/logs/:container` - Retrieve container logs (last 50 lines)
+- `GET /api/relay-metrics` - Relay Proxy CPU and memory metrics
+
+**Health Check:**
+- `GET /health` - API service health status
+
+All API endpoints are accessible at http://localhost:4000
+
+For detailed API documentation, see [api-service/README.md](api-service/README.md)
 
 ### Redis Integration
 
-The relay proxy uses Redis as a persistent data store for caching feature flag configurations. This architecture provides flexibility in how SDK clients retrieve feature flag data.
+The relay proxy uses Redis as a persistent data store for caching feature flag configurations. This architecture provides a clear separation of concerns with each application using its optimal integration pattern.
 
-**Architecture Options:**
+**Architecture Diagram:**
 
-1. **SDK → Relay Proxy → Redis** (Current Configuration):
-   - SDK clients connect to the Relay Proxy via HTTP
-   - Relay Proxy fetches from Redis cache or LaunchDarkly API
-   - Best for: Multiple SDK clients, centralized caching, HTTP-based access
+```
+┌─────────────────┐
+│  Dashboard      │  (Port 8000)
+│  Static UI      │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  API Service    │  (Port 4000)
+│  Status/Metrics │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐      ┌─────────────────┐
+│  Node.js App    │      │  PHP App        │
+│  (Relay Proxy   │      │  (Daemon Mode)  │
+│   Mode Only)    │      │  Redis + Events │
+│  (Port 3000)    │      │  (Port 8080)    │
+└────────┬────────┘      └────────┬────────┘
+         │                        │
+         │ All SDK Traffic        │ Direct Read
+         ▼                        ▼
+┌─────────────────┐      ┌─────────────────┐
+│  Relay Proxy    │─────►│  Redis          │
+│  (Port 8030)    │      │  (Port 6379)    │
+└────────┬────────┘      └─────────────────┘
+         │                        │
+         │ Events                 │ Events
+         └────────────────────────┘
+                  │
+                  ▼
+         ┌─────────────────┐
+         │  LaunchDarkly   │
+         │  Cloud Service  │
+         └─────────────────┘
+```
 
-2. **SDK → Redis** (Alternative Configuration):
-   - SDK clients can be configured to read directly from Redis
-   - Bypasses Relay Proxy for flag evaluation
-   - Best for: High-performance scenarios, reduced network hops, direct cache access
+**Key Architecture Points:**
+- **Dashboard**: Serves static UI, fetches data from API service
+- **API Service**: Centralized gateway for status checks and operations
+- **Node.js**: Single path through Relay Proxy (streaming + events)
+- **PHP**: Direct Redis reads for flags, Relay Proxy for events only
+- **Simplified Configuration**: No mode switching logic in either application
+- **Optimized Performance**: Each application uses its ideal integration pattern
 
-**Benefits of Redis Integration:**
+**Benefits of This Architecture:**
 
 **Data Persistence**: Feature flag data persists across container restarts, reducing initialization time and API calls to LaunchDarkly.
 
@@ -365,11 +481,11 @@ The SDK is configured as a singleton with:
 
 ## SDK Configuration Examples
 
-Both the Node.js and PHP applications support two modes of operation, controlled by the `USE_DAEMON_MODE` environment variable.
+The Node.js and PHP applications use distinct, optimized integration patterns with LaunchDarkly.
 
-### Node.js SDK - Relay Proxy Mode (Default)
+### Node.js SDK - Relay Proxy Mode
 
-When `USE_DAEMON_MODE=false` or not set:
+The Node.js application always uses Relay Proxy mode for all SDK operations:
 
 ```javascript
 const LD = require('@launchdarkly/node-server-sdk');
@@ -389,40 +505,9 @@ const client = LD.init(sdkKey, {
 - Events are sent through the Relay Proxy to LaunchDarkly
 - Relay Proxy handles caching via Redis internally
 
-### Node.js SDK - Daemon Mode
-
-When `USE_DAEMON_MODE=true`:
-
-```javascript
-const LD = require('@launchdarkly/node-server-sdk');
-const { RedisFeatureStore } = require('@launchdarkly/node-server-sdk-redis');
-
-const client = LD.init(sdkKey, {
-  featureStore: RedisFeatureStore({
-    redisOpts: {
-      host: 'redis',
-      port: 6379
-    },
-    prefix: 'ld-flags-{environment-id}',
-    cacheTTL: 30
-  }),
-  sendEvents: true,
-  baseUri: 'http://relay-proxy:8030',
-  streamUri: 'http://relay-proxy:8030',
-  eventsUri: 'http://relay-proxy:8030',
-  useLdd: false  // Allow event sending
-});
-```
-
-**Key Points**:
-- Reads flags directly from Redis (fast, no API calls for flags)
-- Sends events through Relay Proxy
-- Redis prefix must match Relay Proxy's `ENV_DATASTORE_PREFIX`
-- Requires `@launchdarkly/node-server-sdk-redis` package
-
 ### PHP SDK - Daemon Mode (Redis + Events)
 
-The PHP application can operate in daemon mode, reading flags from Redis while still sending events:
+The PHP application always uses daemon mode, reading flags from Redis while sending events:
 
 ```php
 use LaunchDarkly\LDClient;
@@ -457,40 +542,6 @@ $client = new LDClient($sdkKey, [
 - `use_ldd => false` allows event sending (pure daemon mode would disable this)
 - Redis prefix must match Relay Proxy's `ENV_DATASTORE_PREFIX`
 
-### PHP SDK - Relay Proxy Mode
-
-The PHP application can also use standard Relay Proxy mode:
-
-```php
-use LaunchDarkly\LDClient;
-
-// Initialize SDK via Relay Proxy
-$client = new LDClient($sdkKey, [
-    'base_uri' => 'http://relay-proxy:8030',  // All SDK traffic through Relay Proxy
-    'send_events' => true                      // Enable event sending
-]);
-```
-
-**Key Points**:
-- Simpler configuration, similar to Node.js
-- All SDK operations go through Relay Proxy
-- Relay Proxy handles Redis caching internally
-- Good for applications that don't need direct Redis access
-
-### Switching PHP Modes
-
-Control the PHP SDK mode via environment variable:
-
-```bash
-# In .env file
-
-# Daemon Mode: Read flags from Redis, send events via Relay Proxy
-USE_DAEMON_MODE=true
-
-# Relay Proxy Mode: All SDK traffic through Relay Proxy
-USE_DAEMON_MODE=false
-```
-
 ### Redis Key Prefix Configuration
 
 The Redis prefix must match between the Relay Proxy and SDK clients:
@@ -517,16 +568,15 @@ docker exec redis redis-cli KEYS "*"
 
 ### Configuration Comparison
 
-| Feature | Relay Proxy Mode | Daemon Mode |
-|---------|-----------------|-------------|
+| Feature | Node.js (Relay Proxy Mode) | PHP (Daemon Mode) |
+|---------|---------------------------|-------------------|
 | Flag Source | Relay Proxy | Redis Direct |
-| Real-time Updates | Yes (Node.js streaming) | No |
+| Real-time Updates | Yes (streaming) | No |
 | Analytics Events | Yes | Yes |
 | Network Latency | ~10-50ms | <1ms (Redis read) |
 | LaunchDarkly API Calls | Via Relay Proxy | None (for flags) |
 | Redis Dependency | Optional | Required |
 | Best For | Real-time apps, standard setup | High-throughput, air-gapped |
-| Applies To | Both Node.js and PHP | Both Node.js and PHP |
 
 ## PHP Daemon Mode Integration
 
@@ -690,8 +740,9 @@ curl http://localhost:8080
 | `RELAY_PROXY_CONFIG_KEY` | Yes | - | Relay Proxy configuration key |
 | `PORT` | No | 3000 | Port for the Express server |
 | `RELAY_PROXY_URL` | No | http://relay-proxy:8030 | URL of the Relay Proxy |
-| `USE_DAEMON_MODE` | No | false | PHP SDK mode: `true` for daemon mode, `false` for relay proxy mode |
-| `REDIS_PREFIX` | No | - | Redis key prefix (must match Relay Proxy environment ID) |
+| `REDIS_HOST` | No | redis | Redis hostname (PHP only) |
+| `REDIS_PORT` | No | 6379 | Redis port (PHP only) |
+| `REDIS_PREFIX` | No | - | Redis key prefix (PHP only, must match Relay Proxy environment ID) |
 
 ### Obtaining LaunchDarkly Credentials
 
@@ -714,18 +765,33 @@ launchdarkly-relay-proxy-enterprise-demo/
 ├── .env.example           # Example environment configuration
 ├── .gitignore            # Git ignore rules
 ├── LICENSE               # MIT License
-├── Dockerfile            # Docker image definition
-├── docker-compose.yml    # Multi-container orchestration
+├── Dockerfile            # Docker image for Node.js app
+├── docker-compose.yml    # Multi-container orchestration (6 services)
 ├── package.json          # Node.js dependencies and scripts
 ├── server.js             # Express server entry point
 ├── load-test.js          # Standalone load testing script
+├── api-service/          # API Service container
+│   ├── Dockerfile       # API service Docker image
+│   ├── package.json     # API service dependencies
+│   ├── server.js        # API service Express server
+│   └── README.md        # API service documentation
+├── dashboard/           # Dashboard container
+│   ├── Dockerfile       # Dashboard Docker image
+│   └── nginx.conf       # Nginx configuration
 ├── src/
-│   ├── app.js           # Express app and routes
+│   ├── app.js           # Express app and SDK routes
 │   ├── config.js        # Configuration management
 │   └── launchdarkly.js  # LaunchDarkly SDK singleton
-└── public/
-    ├── index.html       # Web UI
-    └── launchdarkly-logo.svg  # LaunchDarkly logo
+├── public/
+│   ├── dashboard.html   # Dashboard web UI
+│   └── launchdarkly-logo.svg  # LaunchDarkly logo
+└── php/                 # PHP application
+    ├── Dockerfile       # PHP Docker image
+    ├── composer.json    # PHP dependencies
+    ├── index.php        # PHP application
+    ├── nginx.conf       # Nginx configuration
+    ├── supervisord.conf # Process manager config
+    └── www.conf         # PHP-FPM pool config
 ```
 
 ## Troubleshooting
@@ -994,9 +1060,8 @@ docker-compose restart php
 
 **Solutions**:
 ```bash
-# Verify both use same environment
+# Verify Redis prefix matches environment
 docker-compose config | grep REDIS_PREFIX
-docker-compose config | grep ENVIRONMENT_ID
 
 # Check Redis keys
 docker exec redis redis-cli KEYS "*"
@@ -1043,31 +1108,6 @@ docker network inspect launchdarkly-network
 docker-compose restart redis php
 ```
 
-### Daemon Mode Not Working (PHP Making API Calls)
-
-**Symptom**: PHP logs show LaunchDarkly API connection attempts
-
-**Causes**:
-- `use_ldd` not set to true in SDK configuration
-- `send_events` not set to false
-- Wrong SDK configuration
-
-**Solutions**:
-```bash
-# Check PHP SDK configuration in index.php
-docker exec php-app cat /var/www/html/index.php | grep -A 10 "LDClient"
-
-# Verify use_ldd is set to true
-docker exec php-app cat /var/www/html/index.php | grep use_ldd
-
-# Verify send_events is set to false
-docker exec php-app cat /var/www/html/index.php | grep send_events
-
-# If configuration is wrong, fix index.php and rebuild
-docker-compose build php
-docker-compose up -d php
-```
-
 ## Feature Flag Configuration
 
 ### Recommended Flag Setup
@@ -1099,13 +1139,6 @@ Target anonymous users:
 If user.anonymous is true
   Serve variation 1
 ```
-
-### Additional Demo Flags
-
-**relay-proxy-status-response** (Boolean):
-- Controls logging of relay proxy status responses
-- Default: false
-- Use for debugging
 
 ## Best Practices
 

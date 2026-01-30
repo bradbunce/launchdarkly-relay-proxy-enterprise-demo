@@ -24,11 +24,8 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 RUN rm -f /etc/nginx/http.d/default.conf
 COPY nginx.conf /etc/nginx/http.d/default.conf
 
-# Configure PHP-FPM to use Unix socket
-RUN echo "listen = /var/run/php-fpm.sock" >> /usr/local/etc/php-fpm.d/zz-custom.conf \
-    && echo "listen.owner = nginx" >> /usr/local/etc/php-fpm.d/zz-custom.conf \
-    && echo "listen.group = nginx" >> /usr/local/etc/php-fpm.d/zz-custom.conf \
-    && echo "listen.mode = 0660" >> /usr/local/etc/php-fpm.d/zz-custom.conf
+# Configure PHP-FPM with custom pool settings
+COPY www.conf /usr/local/etc/php-fpm.d/www.conf
 
 # Disable opcache for development
 RUN echo "opcache.enable=0" >> /usr/local/etc/php/conf.d/opcache.ini \

@@ -1,4 +1,5 @@
 const express = require('express');
+const session = require('express-session');
 const path = require('path');
 const { exec } = require('child_process');
 const util = require('util');
@@ -7,14 +8,31 @@ const { getLaunchDarklyClient, getInitializationError, onFlagChange } = require(
 
 const execPromise = util.promisify(exec);
 
+// Import undici Agent for custom fetch timeouts
+let sseAgent = null;
+try {
+  const undici = require('undici');
+  sseAgent = new undici.Agent({
+    headersTimeout: 60000, // 60 seconds for headers
+    bodyTimeout: 0, // No timeout for body (SSE streams are long-lived)
+    keepAliveTimeout: 600000, // 10 minutes keep-alive
+    keepAliveMaxTimeout: 600000
+  });
+} catch (err) {
+  console.log('undici not available, using default fetch settings');
+}
+
 // Store SSE clients
 const sseClients = new Set();
+
+// Store SSE clients for Node.js service (dashboard)
+const nodeSseClients = new Set();
 
 // Generate a single anonymous user key for this session
 const anonymousUserKey = `anon-${crypto.randomUUID()}`;
 
 // Container name for context
-const containerName = 'app-dev';
+const containerName = 'node-app-dev';
 
 // Store last evaluated flag values for change detection
 const lastFlagValues = new Map();
@@ -23,8 +41,54 @@ const lastFlagValues = new Map();
 function createApp() {
   const app = express();
 
-  // Serve static files from public directory
-  app.use(express.static(path.join(__dirname, '..', 'public')));
+  // Enable CORS for all routes to allow dashboard at port 8000
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    // Allow requests from dashboard (port 8000) and localhost variations
+    if (origin && (origin.includes('localhost:8000') || origin.includes('127.0.0.1:8000'))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      // Fallback for other origins (without credentials)
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control');
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+    
+    next();
+  });
+
+  // Configure session middleware
+  app.use(session({
+    secret: process.env.SESSION_SECRET || 'launchdarkly-demo-secret-' + crypto.randomUUID(),
+    resave: false,
+    saveUninitialized: true,
+    cookie: { 
+      secure: false, // Set to true if using HTTPS
+      httpOnly: false, // Allow JavaScript access for cross-origin
+      sameSite: false, // Disable sameSite to allow all cross-origin requests (development only)
+      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
+  }));
+
+  // Middleware to initialize session context
+  app.use((req, res, next) => {
+    if (!req.session.nodeServiceContext) {
+      req.session.nodeServiceContext = {
+        type: 'anonymous',
+        key: `node-anon-${crypto.randomUUID()}`,
+        anonymous: true
+      };
+    }
+    next();
+  });
+
+
 
   // Helper function to build LaunchDarkly context
   function buildContext(customContext) {
@@ -57,6 +121,7 @@ function createApp() {
       kind: 'multi',
       user: userContext,
       container: {
+        kind: 'container',
         key: containerName
       }
     };
@@ -99,7 +164,7 @@ function createApp() {
       // If SDK failed to initialize, show the error
       const error = getInitializationError();
       if (error) {
-        message = `SDK Error: ${error}\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"`;
+        message = 'SDK Error: ' + error + '\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"';
       } else {
         message = 'SDK Error: LaunchDarkly client not initialized (unknown reason)\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"';
       }
@@ -108,18 +173,55 @@ function createApp() {
     }
     
     try {
+      // Wait for SDK to be initialized before evaluating (max 3 seconds)
+      if (!ldClient.initialized()) {
+        console.log(`[message-stream] SDK not yet initialized, waiting up to 3 seconds...`);
+        try {
+          await ldClient.waitForInitialization({ timeout: 3 });
+          console.log(`[message-stream] SDK initialized successfully`);
+        } catch (timeoutError) {
+          console.warn(`[message-stream] SDK initialization timeout, proceeding anyway`);
+        }
+      }
+      
       // Check if client is initialized
       const initError = getInitializationError();
       if (initError) {
         // SDK exists but has error - still evaluate to show fallback behavior
         const context = buildContext(clientInfo.customContext);
         const fallbackValue = await ldClient.variation('user-message', context, 'Fallback: Flag not found or SDK offline');
-        message = `SDK Error: ${initError}\n\nUsing fallback variation: "${fallbackValue}"`;
+        message = 'SDK Error: ' + initError + '\n\nUsing fallback variation: "' + fallbackValue + '"';
       } else {
         // Build context using helper function
         const context = buildContext(clientInfo.customContext);
         
-        // Evaluate the flag with descriptive fallback
+        // Wait for SDK to have valid flag data (max 5 seconds)
+        const maxWaitTime = 5000; // 5 seconds
+        const waitInterval = 100; // 100ms
+        let waited = 0;
+        let flagsValid = false;
+        
+        console.log(`[message-stream] Waiting for SDK to have valid flag data...`);
+        while (waited < maxWaitTime) {
+          // Check if SDK has valid flag data using allFlagsState
+          const flagsState = await ldClient.allFlagsState(context);
+          flagsValid = flagsState.valid;
+          
+          if (flagsValid) {
+            console.log(`[message-stream] SDK has valid flag data after ${waited}ms`);
+            break;
+          }
+          
+          // Wait a bit and try again
+          await new Promise(resolve => setTimeout(resolve, waitInterval));
+          waited += waitInterval;
+        }
+        
+        if (!flagsValid) {
+          console.log(`[message-stream] SDK still doesn't have valid flag data after ${maxWaitTime}ms wait`);
+        }
+        
+        // Now evaluate the flag
         message = await ldClient.variation('user-message', context, 'Fallback: Flag not found or SDK offline');
         
         // Track flag value changes
@@ -142,7 +244,7 @@ function createApp() {
       }
     } catch (error) {
       console.error('Error evaluating feature flag:', error);
-      message = `Flag Evaluation Error: ${error.message}\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"`;
+      message = 'Flag Evaluation Error: ' + error.message + '\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"';
     }
     
     clientInfo.res.write(`data: ${JSON.stringify({ message })}\n\n`);
@@ -160,6 +262,7 @@ function createApp() {
   onFlagChange((settings) => {
     console.log('Flag change callback triggered');
     broadcastMessage();
+    broadcastNodeServiceMessage();
   });
 
   // API endpoint to get feature flag value (for initial load fallback)
@@ -170,7 +273,7 @@ function createApp() {
       // If SDK failed to initialize, show the error
       const error = getInitializationError();
       const message = error 
-        ? `SDK Error: ${error}\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"`
+        ? 'SDK Error: ' + error + '\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"'
         : 'SDK Error: LaunchDarkly client not initialized (unknown reason)\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"';
       return res.json({ message });
     }
@@ -196,81 +299,165 @@ function createApp() {
       res.json({ message });
     } catch (error) {
       console.error('Error evaluating feature flag:', error);
-      res.json({ message: `Flag Evaluation Error: ${error.message}\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"` });
+      res.json({ message: 'Flag Evaluation Error: ' + error.message + '\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"' });
     }
   });
 
   // API endpoint to get SDK configuration
   app.get('/api/sdk-config', (req, res) => {
-    // Read directly from environment to avoid caching
-    const useDaemonMode = process.env.USE_DAEMON_MODE === 'true';
+    // Node.js always uses Relay Proxy mode
     const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
-    const redisHost = process.env.REDIS_HOST || 'redis';
-    const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
-    const redisPrefix = process.env.REDIS_PREFIX || null;
     
     res.json({
-      mode: useDaemonMode ? 'Daemon Mode (Redis + Events)' : 'Relay Proxy Mode',
-      useDaemonMode: useDaemonMode,
-      relayProxyUrl: relayProxyUrl,
-      redisHost: useDaemonMode ? redisHost : null,
-      redisPort: useDaemonMode ? redisPort : null,
-      redisPrefix: useDaemonMode ? redisPrefix : null
+      mode: 'Relay Proxy Mode',
+      relayProxyUrl: relayProxyUrl
     });
   });
 
-  // API endpoint to get relay proxy status
-  app.get('/api/relay-status', async (req, res) => {
+
+
+  // API endpoint to trigger load test (POST)
+  app.post('/api/load-test', express.json(), async (req, res) => {
+    const requests = parseInt(req.body.requests) || 100;
+    const concurrency = parseInt(req.body.concurrency) || 10;
+    const service = req.body.service || 'node';
+    
+    // Only handle Node.js service here
+    if (service !== 'node') {
+      return res.status(400).json({
+        success: false,
+        error: 'This endpoint only handles Node.js load tests'
+      });
+    }
+    
     try {
-      const response = await fetch('http://relay-proxy:8030/status');
-      const status = await response.json();
+      // Run load test and wait for results
+      const results = await runLoadTest(requests, concurrency);
       
-      // Check feature flag to determine if we should log the response
-      const ldClient = getLaunchDarklyClient();
-      if (ldClient) {
-        try {
-          // Build context using helper function
-          const context = buildContext(null); // Anonymous context
-          
-          const shouldLog = await ldClient.variation('relay-proxy-status-response', context, false);
-          if (shouldLog) {
-            console.log('Relay Proxy Status Response:', JSON.stringify(status, null, 2));
-          }
-        } catch (error) {
-          console.error('Error evaluating relay-proxy-status-response flag:', error);
-        }
-      }
-      
-      res.json(status);
+      // Return results
+      res.status(200).json({
+        success: true,
+        totalRequests: results.totalRequests,
+        successful: results.successful,
+        failed: results.failed,
+        avgResponseTime: results.avgResponseTime,
+        requestsPerSecond: results.requestsPerSecond
+      });
     } catch (error) {
-      console.error('Error fetching relay proxy status:', error);
-      res.status(500).json({ error: 'Failed to fetch relay proxy status' });
+      console.error('Load test error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
     }
   });
 
-  // API endpoint to get relay proxy metrics
-  app.get('/api/relay-metrics', async (req, res) => {
-    try {
-      // Get Docker stats for relay-proxy container
-      const { stdout } = await execPromise('docker stats relay-proxy --no-stream --format "{{json .}}"');
-      const stats = JSON.parse(stdout);
-      
-      // Parse CPU and memory usage
-      const cpuPercent = parseFloat(stats.CPUPerc.replace('%', ''));
-      const memUsage = stats.MemUsage; // e.g., "45.5MiB / 7.775GiB"
-      const memPercent = parseFloat(stats.MemPerc.replace('%', ''));
-      
-      res.json({
-        cpu: cpuPercent,
-        memory: memUsage,
-        memoryPercent: memPercent,
-        timestamp: Date.now()
-      });
-    } catch (error) {
-      console.error('Error fetching relay proxy metrics:', error);
-      res.status(500).json({ error: 'Failed to fetch relay proxy metrics' });
+  // Helper function to run load test
+  async function runLoadTest(totalRequests, concurrency) {
+    console.log('=== Load Test Configuration ===');
+    console.log(`Total Requests: ${totalRequests}`);
+    console.log(`Concurrency: ${concurrency}`);
+    console.log('==============================\n');
+    
+    const stats = {
+      totalRequests: 0,
+      successful: 0,
+      failed: 0,
+      totalLatency: 0,
+      minLatency: Infinity,
+      maxLatency: 0
+    };
+    
+    const client = getLaunchDarklyClient();
+    if (!client) {
+      console.log('Failed to get LaunchDarkly client');
+      throw new Error('LaunchDarkly client not available');
     }
-  });
+    
+    console.log('Starting load test...\n');
+    const startTime = Date.now();
+    
+    // Run requests in batches based on concurrency
+    const batches = Math.ceil(totalRequests / concurrency);
+    
+    for (let batch = 0; batch < batches; batch++) {
+      const batchSize = Math.min(concurrency, totalRequests - (batch * concurrency));
+      const promises = [];
+      
+      for (let i = 0; i < batchSize; i++) {
+        const requestNum = (batch * concurrency) + i;
+        const context = buildContext({
+          email: `load-test-${requestNum}@example.com`,
+          name: `Load Test User ${requestNum}`
+        });
+        
+        const promise = (async () => {
+          const reqStartTime = Date.now();
+          try {
+            const flagValue = await client.variation('user-message', context, 'Fallback: Flag not found or SDK offline');
+            const latency = Date.now() - reqStartTime;
+            
+            // Track custom event with response time metric
+            client.track('load-test-request', context, {
+              requestNumber: requestNum,
+              batchNumber: batch,
+              flagValue: flagValue
+            }, latency);
+            
+            stats.totalRequests++;
+            stats.successful++;
+            stats.totalLatency += latency;
+            stats.minLatency = Math.min(stats.minLatency, latency);
+            stats.maxLatency = Math.max(stats.maxLatency, latency);
+          } catch (error) {
+            stats.totalRequests++;
+            stats.failed++;
+          }
+        })();
+        
+        promises.push(promise);
+      }
+      
+      await Promise.all(promises);
+      
+      // Log progress every 10 batches
+      if ((batch + 1) % 10 === 0) {
+        console.log(`Progress: ${stats.totalRequests}/${totalRequests} requests completed`);
+      }
+    }
+    
+    const totalTime = (Date.now() - startTime) / 1000; // in seconds
+    
+    // Flush events to ensure they're sent to LaunchDarkly
+    console.log('\nFlushing events to LaunchDarkly...');
+    await client.flush();
+    console.log('Events flushed successfully');
+    
+    // Final stats
+    const avgLatency = stats.successful > 0 
+      ? (stats.totalLatency / stats.successful).toFixed(2) 
+      : 0;
+    const requestsPerSecond = (stats.successful / totalTime).toFixed(2);
+    
+    console.log('\n=== Final Results ===');
+    console.log(`Total Requests: ${stats.totalRequests}`);
+    console.log(`Successful: ${stats.successful}`);
+    console.log(`Failed: ${stats.failed}`);
+    console.log(`Average Response Time: ${avgLatency}ms`);
+    console.log(`Min Latency: ${stats.minLatency === Infinity ? 'N/A' : stats.minLatency + 'ms'}`);
+    console.log(`Max Latency: ${stats.maxLatency}ms`);
+    console.log(`Total Time: ${totalTime.toFixed(2)}s`);
+    console.log(`Requests/sec: ${requestsPerSecond}`);
+    console.log('\nLoad test complete!');
+    
+    return {
+      totalRequests: stats.totalRequests,
+      successful: stats.successful,
+      failed: stats.failed,
+      avgResponseTime: parseFloat(avgLatency),
+      requestsPerSecond: parseFloat(requestsPerSecond)
+    };
+  }
 
   // API endpoint for load testing with SSE
   app.get('/api/load-test/stream', async (req, res) => {
@@ -406,27 +593,7 @@ function createApp() {
     res.end();
   });
 
-  // API endpoint to fetch container logs
-  app.get('/api/logs/:container', async (req, res) => {
-    const { container } = req.params;
-    const allowedContainers = ['app-dev', 'relay-proxy', 'redis'];
-    
-    if (!allowedContainers.includes(container)) {
-      return res.status(400).json({ error: 'Invalid container name' });
-    }
-    
-    try {
-      const { stdout, stderr } = await execPromise(`docker logs --tail 50 ${container} 2>&1`);
-      const logs = (stdout + stderr).split('\n').filter(line => line.trim());
-      res.json({ lines: logs });
-    } catch (error) {
-      console.error(`Error fetching logs for ${container}:`, error);
-      res.json({ 
-        error: `Unable to fetch logs for ${container}. Container may not be running.`,
-        lines: []
-      });
-    }
-  });
+
 
   // API endpoint to get Redis monitor stream
   app.get('/api/redis/monitor', (req, res) => {
@@ -443,11 +610,20 @@ function createApp() {
       // Send initial connection message
       res.write(`data: ${JSON.stringify({ type: 'info', message: 'Connected to Redis MONITOR' })}\n\n`);
       
+      // Helper function to check if a line contains the PING command
+      const containsPingCommand = (line) => {
+        // Match "ping" as a complete word/command using word boundaries or quotes
+        return /\bping\b|"ping"/i.test(line);
+      };
+      
       // Stream stdout
       monitor.stdout.on('data', (data) => {
         const lines = data.toString().split('\n').filter(line => line.trim());
         lines.forEach(line => {
-          res.write(`data: ${JSON.stringify({ type: 'command', message: line })}\n\n`);
+          // Filter out PING commands but preserve words containing "ping" like "shopping"
+          if (!containsPingCommand(line)) {
+            res.write(`data: ${JSON.stringify({ type: 'command', message: line })}\n\n`);
+          }
         });
       });
       
@@ -477,33 +653,405 @@ function createApp() {
     }
   });
 
-  // API endpoint to clear container logs
-  app.post('/api/logs/:container/clear', async (req, res) => {
-    const { container } = req.params;
-    const allowedContainers = ['app-dev', 'relay-proxy', 'redis'];
+
+
+  // ===== Node.js Service Endpoints (Dashboard) =====
+  
+  // Helper function to build Node.js service context from session or override
+  function buildNodeServiceContext(req, contextOverride) {
+    const nodeServiceContext = contextOverride || req.session.nodeServiceContext;
+    const userContext = {
+      key: nodeServiceContext.key,
+      anonymous: nodeServiceContext.anonymous || false
+    };
     
-    if (!allowedContainers.includes(container)) {
-      return res.status(400).json({ error: 'Invalid container name' });
+    if (nodeServiceContext.name) {
+      userContext.name = nodeServiceContext.name;
+    }
+    if (nodeServiceContext.email) {
+      userContext.email = nodeServiceContext.email;
+    }
+    if (nodeServiceContext.location) {
+      userContext.location = nodeServiceContext.location;
+    }
+    
+    return {
+      kind: 'multi',
+      user: userContext,
+      container: {
+        key: 'node-service'
+      }
+    };
+  }
+
+  // SSE endpoint for Node.js service real-time flag updates
+  app.get('/api/node/message/stream', (req, res) => {
+    // Get context key from query parameter
+    const contextKey = req.query.contextKey;
+    
+    // Debug logging
+    console.log('=== SSE Connection ===');
+    console.log('Context Key from URL:', contextKey);
+    console.log('Session ID:', req.sessionID);
+    console.log('Session Context Key:', req.session.nodeServiceContext.key);
+    
+    // Use context key from URL if provided, otherwise fall back to session
+    let contextToUse = req.session.nodeServiceContext;
+    if (contextKey && contextKey !== req.session.nodeServiceContext.key) {
+      console.log('Using context key from URL instead of session');
+      contextToUse = { ...req.session.nodeServiceContext, key: contextKey };
+    }
+    console.log('======================');
+    
+    // Set headers for SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    
+    // Add client to set with context reference
+    const clientInfo = { res, req, serviceId: 'node', contextOverride: contextToUse };
+    nodeSseClients.add(clientInfo);
+    
+    // Send initial message
+    sendNodeServiceMessage(clientInfo);
+    
+    // Remove client on disconnect
+    req.on('close', () => {
+      nodeSseClients.delete(clientInfo);
+    });
+  });
+
+  // Helper function to evaluate flag and send to Node.js service client
+  async function sendNodeServiceMessage(clientInfo) {
+    const ldClient = getLaunchDarklyClient();
+    
+    let message = 'Unexpected Error: No message was set (this should not happen)';
+    
+    if (!ldClient) {
+      const error = getInitializationError();
+      if (error) {
+        message = 'SDK Error: ' + error + '\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"';
+      } else {
+        message = 'SDK Error: LaunchDarkly client not initialized (unknown reason)\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"';
+      }
+      clientInfo.res.write(`data: ${JSON.stringify({ message })}\n\n`);
+      return;
     }
     
     try {
-      const { stdout } = await execPromise(`docker inspect --format='{{.LogPath}}' ${container}`);
-      const logPath = stdout.trim();
+      // Wait for SDK to be initialized before evaluating (max 3 seconds)
+      if (!ldClient.initialized()) {
+        console.log(`[node-service] SDK not yet initialized, waiting up to 3 seconds...`);
+        try {
+          await ldClient.waitForInitialization({ timeout: 3 });
+          console.log(`[node-service] SDK initialized successfully`);
+        } catch (timeoutError) {
+          console.warn(`[node-service] SDK initialization timeout, proceeding anyway`);
+        }
+      }
       
-      if (logPath) {
-        await execPromise(`docker run --rm -v /var/lib/docker:/var/lib/docker alpine sh -c "truncate -s 0 ${logPath}"`);
-        res.json({ success: true, message: `Logs cleared for ${container}` });
+      const initError = getInitializationError();
+      if (initError) {
+        const context = buildNodeServiceContext(clientInfo.req, clientInfo.contextOverride);
+        const fallbackValue = await ldClient.variation('user-message', context, 'Fallback: Flag not found or SDK offline');
+        message = 'SDK Error: ' + initError + '\n\nUsing fallback variation: "' + fallbackValue + '"';
       } else {
-        res.status(500).json({ error: 'Could not find log file path' });
+        const context = buildNodeServiceContext(clientInfo.req, clientInfo.contextOverride);
+        
+        // Wait for SDK to have valid flag data (max 5 seconds)
+        const maxWaitTime = 5000; // 5 seconds
+        const waitInterval = 100; // 100ms
+        let waited = 0;
+        let flagsValid = false;
+        
+        console.log(`[node-service] Waiting for SDK to have valid flag data...`);
+        while (waited < maxWaitTime) {
+          // Check if SDK has valid flag data using allFlagsState
+          const flagsState = await ldClient.allFlagsState(context);
+          flagsValid = flagsState.valid;
+          
+          if (flagsValid) {
+            console.log(`[node-service] SDK has valid flag data after ${waited}ms`);
+            break;
+          }
+          
+          // Wait a bit and try again
+          await new Promise(resolve => setTimeout(resolve, waitInterval));
+          waited += waitInterval;
+        }
+        
+        if (!flagsValid) {
+          console.log(`[node-service] SDK still doesn't have valid flag data after ${maxWaitTime}ms wait`);
+        }
+        
+        // Now evaluate the flag
+        message = await ldClient.variation('user-message', context, 'Fallback: Flag not found or SDK offline');
+        
+        const nodeServiceContext = clientInfo.req.session.nodeServiceContext;
+        const contextKey = `node-service|${context.user.key}`;
+        const lastValue = lastFlagValues.get(contextKey);
+        if (lastValue !== undefined && lastValue !== message) {
+          console.log(`=== Node Service Flag Evaluation Changed ===`);
+          console.log(`Flag: user-message`);
+          console.log(`Context: ${context.user.anonymous ? 'Anonymous' : 'Custom'} (${context.user.key})`);
+          console.log(`Previous value: "${lastValue}"`);
+          console.log(`New value: "${message}"`);
+          console.log(`==========================================`);
+        }
+        lastFlagValues.set(contextKey, message);
       }
     } catch (error) {
-      console.error(`Error clearing logs for ${container}:`, error);
-      res.status(500).json({ 
-        error: `Unable to clear logs for ${container}. ${error.message}`
+      console.error('Error evaluating feature flag for Node service:', error);
+      message = 'Flag Evaluation Error: ' + error.message + '\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"';
+    }
+    
+    clientInfo.res.write(`data: ${JSON.stringify({ message })}\n\n`);
+  }
+
+  // Broadcast message to all Node.js service clients
+  async function broadcastNodeServiceMessage() {
+    console.log(`Broadcasting to ${nodeSseClients.size} Node.js service clients`);
+    for (const clientInfo of nodeSseClients) {
+      await sendNodeServiceMessage(clientInfo);
+    }
+  }
+
+  // POST endpoint to update Node.js service context
+  app.post('/api/node/context', express.json(), async (req, res) => {
+    try {
+      const { type, email, name, location } = req.body;
+      
+      if (type === 'custom') {
+        if (!email || email.trim() === '') {
+          return res.status(400).json({ success: false, error: 'Email is required for custom context' });
+        }
+        
+        req.session.nodeServiceContext = {
+          type: 'custom',
+          key: email,
+          email: email,
+          anonymous: false
+        };
+        
+        if (name && name.trim() !== '') {
+          req.session.nodeServiceContext.name = name;
+        }
+        if (location && location.trim() !== '') {
+          req.session.nodeServiceContext.location = location;
+        }
+      } else {
+        // Anonymous context
+        req.session.nodeServiceContext = {
+          type: 'anonymous',
+          key: `node-anon-${crypto.randomUUID()}`,
+          anonymous: true
+        };
+        
+        if (location && location.trim() !== '') {
+          req.session.nodeServiceContext.location = location;
+        }
+      }
+      
+      console.log(`Node.js service context updated: ${req.session.nodeServiceContext.type} (${req.session.nodeServiceContext.key})`);
+      if (req.session.nodeServiceContext.location) {
+        console.log(`  Location: ${req.session.nodeServiceContext.location}`);
+      }
+      
+      // Save session explicitly to ensure it's persisted
+      req.session.save((err) => {
+        if (err) {
+          console.error('Error saving session:', err);
+          return res.status(500).json({ success: false, error: 'Failed to save session' });
+        }
+        
+        // Broadcast updated flag value to all connected clients
+        broadcastNodeServiceMessage();
+        
+        // Return the saved context so the UI can confirm what was saved
+        res.json({ 
+          success: true,
+          context: {
+            type: req.session.nodeServiceContext.type,
+            key: req.session.nodeServiceContext.key,
+            email: req.session.nodeServiceContext.email || null,
+            name: req.session.nodeServiceContext.name || null,
+            location: req.session.nodeServiceContext.location || null,
+            anonymous: req.session.nodeServiceContext.anonymous || false
+          }
+        });
+      });
+    } catch (error) {
+      console.error('Error updating Node.js service context:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET endpoint for Node.js service status
+  app.get('/api/node/status', (req, res) => {
+    const ldClient = getLaunchDarklyClient();
+    const initError = getInitializationError();
+    
+    // Check if client is initialized using the SDK's built-in method
+    const isInitialized = ldClient ? ldClient.initialized() : false;
+    
+    res.json({
+      connected: isInitialized && !initError,
+      mode: 'Relay Proxy Mode',
+      sdkVersion: 'Node.js SDK',
+      error: initError || null
+    });
+  });
+
+  // GET endpoint for Node.js service current context
+  app.get('/api/node/context', (req, res) => {
+    const nodeServiceContext = req.session.nodeServiceContext;
+    
+    res.json({
+      type: nodeServiceContext.type,
+      key: nodeServiceContext.key,
+      email: nodeServiceContext.email || null,
+      name: nodeServiceContext.name || null,
+      location: nodeServiceContext.location || null,
+      anonymous: nodeServiceContext.anonymous || false
+    });
+  });
+
+  // POST endpoint to test Node.js flag evaluation
+  app.post('/api/node/test-evaluation', express.json(), async (req, res) => {
+    try {
+      console.log('=== Test Evaluation Request ===');
+      console.log('Request body:', JSON.stringify(req.body, null, 2));
+      
+      const ldClient = getLaunchDarklyClient();
+      
+      if (!ldClient) {
+        const initError = getInitializationError();
+        return res.status(500).json({
+          success: false,
+          error: initError || 'SDK not initialized'
+        });
+      }
+      
+      // Use context from request body if provided, otherwise use session
+      let nodeServiceContext;
+      if (req.body && req.body.context) {
+        // Use the context sent from the dashboard
+        nodeServiceContext = req.body.context;
+        console.log('Using context from request body');
+      } else {
+        // Fallback to session context
+        nodeServiceContext = req.session.nodeServiceContext;
+        console.log('Using context from session');
+      }
+      
+      console.log('Node service context:', JSON.stringify(nodeServiceContext, null, 2));
+      
+      // Build context from the provided or session context
+      const context = buildNodeServiceContext({ session: { nodeServiceContext } });
+      
+      // Log context info
+      console.log('=== Test Flag Evaluation ===');
+      console.log(`Node.js SDK: Context Type: ${nodeServiceContext.type}`);
+      console.log(`Node.js SDK: Context Key: ${context.user.key}`);
+      if (nodeServiceContext.name) {
+        console.log(`Node.js SDK: Context Name: ${nodeServiceContext.name}`);
+      }
+      if (nodeServiceContext.email) {
+        console.log(`Node.js SDK: Context Email: ${nodeServiceContext.email}`);
+      }
+      if (nodeServiceContext.location) {
+        console.log(`Node.js SDK: Context Location: ${nodeServiceContext.location} ✓`);
+      }
+      console.log(`Node.js SDK: Context Anonymous: ${nodeServiceContext.anonymous || false}`);
+      
+      // Evaluate flag
+      console.log("Node.js SDK: Evaluating flag 'user-message'");
+      const flagValue = await ldClient.variation('user-message', context, 'Fallback: Flag not found');
+      console.log(`Node.js SDK: Flag evaluation result: ${flagValue}`);
+      console.log('===========================');
+      
+      res.json({
+        success: true,
+        flagValue: flagValue,
+        context: {
+          type: nodeServiceContext.type,
+          key: context.user.key,
+          name: nodeServiceContext.name || null,
+          email: nodeServiceContext.email || null,
+          location: nodeServiceContext.location || null,
+          anonymous: nodeServiceContext.anonymous || false
+        }
+      });
+    } catch (error) {
+      console.error('Node.js SDK ERROR during test evaluation:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message
       });
     }
   });
 
+  // GET endpoint to get all flags state (SDK cache)
+  app.post('/api/node/all-flags', express.json(), async (req, res) => {
+    try {
+      const ldClient = getLaunchDarklyClient();
+      
+      if (!ldClient) {
+        const initError = getInitializationError();
+        return res.status(500).json({
+          success: false,
+          error: initError || 'SDK not initialized'
+        });
+      }
+      
+      // Use context from request body if provided, otherwise use session
+      let nodeServiceContext;
+      if (req.body && req.body.context) {
+        // Use the context sent from the dashboard
+        nodeServiceContext = req.body.context;
+        console.log('=== All Flags Request (from body) ===');
+      } else {
+        // Fallback to session context
+        nodeServiceContext = req.session.nodeServiceContext;
+        console.log('=== All Flags Request (from session) ===');
+      }
+      
+      // Build context
+      const context = buildNodeServiceContext({ session: { nodeServiceContext } });
+      
+      console.log('Session ID:', req.sessionID);
+      console.log('Full Context:', JSON.stringify(context, null, 2));
+      console.log('========================');
+      
+      // Get all flags state
+      const flagsState = await ldClient.allFlagsState(context);
+      const allFlags = flagsState.allValues();
+      
+      console.log('Flag Values:', JSON.stringify(allFlags, null, 2));
+      
+      res.json({
+        success: true,
+        flags: allFlags,
+        valid: flagsState.valid,
+        context: {
+          type: nodeServiceContext.type,
+          key: context.user.key,
+          email: nodeServiceContext.email || null,
+          name: nodeServiceContext.name || null,
+          location: nodeServiceContext.location || null,
+          anonymous: nodeServiceContext.anonymous || false
+        }
+      });
+    } catch (error) {
+      console.error('Error getting all flags:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  
   return app;
 }
 

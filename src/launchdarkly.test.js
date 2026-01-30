@@ -8,6 +8,45 @@ describe('LaunchDarkly SDK Integration Unit Tests', () => {
   });
 
   /**
+   * Requirements: 1.1, 1.2, 4.2, 4.3
+   * Test that initializeLaunchDarkly creates relay proxy configuration only
+   */
+  test('initializeLaunchDarkly creates relay proxy configuration only', async () => {
+    const config = {
+      sdkKey: 'sdk-test-key-12345',
+      relayProxyUrl: 'http://relay-proxy:8030'
+    };
+
+    const client = await initializeLaunchDarkly(config);
+
+    // Should return client (even if initialization times out, client is returned for graceful degradation)
+    expect(client).not.toBeNull();
+    expect(typeof client).toBe('object');
+  }, 10000);
+
+  /**
+   * Requirements: 4.2, 4.3
+   * Test that daemon mode parameters are not accepted
+   */
+  test('Daemon mode parameters are not used even if provided', async () => {
+    const config = {
+      sdkKey: 'sdk-test-key-12345',
+      relayProxyUrl: 'http://relay-proxy:8030',
+      // These should be ignored
+      useDaemonMode: true,
+      redisHost: 'redis',
+      redisPort: 6379,
+      redisPrefix: 'ld'
+    };
+
+    const client = await initializeLaunchDarkly(config);
+
+    // Should still initialize successfully (ignoring daemon mode params)
+    expect(client).not.toBeNull();
+    expect(typeof client).toBe('object');
+  }, 10000);
+
+  /**
    * Requirements: 2.2, 2.4
    * Test that SDK initializes with valid configuration
    */

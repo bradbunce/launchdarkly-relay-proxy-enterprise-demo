@@ -353,6 +353,7 @@
           <div><strong>Type:</strong> Anonymous</div>
         </div>
         <button class="edit-context-btn" onclick="openContextModal()">Change Context</button>
+        <button class="edit-context-btn" onclick="testFlagEvaluation()" style="margin-left: 10px;">Test Flag Evaluation</button>
       </div>
       
       <div style="margin-top: 20px; text-align: center;">
@@ -363,7 +364,7 @@
     
     <div class="console-container">
       <div class="console-header">
-        <span>app-dev container logs</span>
+        <span>node-app-dev container logs</span>
         <button class="clear-btn" onclick="clearLogs('app-logs')">Clear</button>
       </div>
       <div class="console-output" id="app-logs"></div>
@@ -813,6 +814,42 @@
       btn.disabled = false;
     }
     
+    // Test Flag Evaluation function
+    async function testFlagEvaluation() {
+      try {
+        const response = await fetch('/api/node/test-evaluation', {
+          method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          // Update the flag display with the evaluated value
+          const messageElement = document.getElementById('message');
+          if (messageElement) {
+            messageElement.textContent = data.flagValue;
+          }
+          
+          let contextDetails = `Context:\n- Type: ${data.context.type}\n- Key: ${data.context.key}\n- Anonymous: ${data.context.anonymous}`;
+          if (data.context.name) {
+            contextDetails += `\n- Name: ${data.context.name}`;
+          }
+          if (data.context.email) {
+            contextDetails += `\n- Email: ${data.context.email}`;
+          }
+          if (data.context.location) {
+            contextDetails += `\n- Location: ${data.context.location}`;
+          }
+          
+          alert(`Test Evaluation Complete!\n\nFlag Value: ${data.flagValue}\n\n${contextDetails}\n\nCheck the node-app-dev logs for detailed output.`);
+        } else {
+          alert(`Test Evaluation Failed:\n${data.error}`);
+        }
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      }
+    }
+    
     async function startLoadTest() {
       const clients = document.getElementById('loadTestClients').value;
       const duration = document.getElementById('loadTestDuration').value;
@@ -911,7 +948,7 @@
     // Clear logs function - truncates the Docker container log file
     async function clearLogs(elementId) {
       const containerMap = {
-        'app-logs': 'app-dev',
+        'app-logs': 'node-app-dev',
         'relay-logs': 'relay-proxy',
         'redis-logs': 'redis'
       };
@@ -970,7 +1007,7 @@
     
     // Update logs every 2 seconds
     setInterval(() => {
-      fetchLogs('app-dev', 'app-logs');
+      fetchLogs('node-app-dev', 'app-logs');
       fetchLogs('relay-proxy', 'relay-logs');
     }, 2000);
     
@@ -990,6 +1027,12 @@
       
       redisMonitorEventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        
+        // Skip PING commands (health checks) - case insensitive
+        if (data.message && data.message.toLowerCase().includes('"ping"')) {
+          return;
+        }
+        
         const timestamp = new Date().toLocaleTimeString();
         
         let className = 'log-info';
@@ -1053,7 +1096,7 @@
     // Initial load
     detectLocation(); // Start location detection immediately
     updateContextDisplay();
-    fetchLogs('app-dev', 'app-logs');
+    fetchLogs('node-app-dev', 'app-logs');
     fetchLogs('relay-proxy', 'relay-logs');
     connectRedisMonitor(); // Start Redis monitor stream
     fetchSDKConfig(); // Fetch SDK configuration

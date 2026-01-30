@@ -1,0 +1,2911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LaunchDarkly Relay Proxy - Unified Dashboard</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background-color: #f5f5f5;
+      overflow: hidden;
+    }
+
+    .dashboard-container {
+      width: 2056px;
+      height: 1285px;
+      display: grid;
+      grid-template-rows: 771px 514px;
+      grid-template-columns: 1fr;
+      gap: 0;
+      overflow: hidden;
+    }
+
+    .services-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 20px;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+
+    .logs-section {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      padding: 10px;
+      background-color: #0a0a0a;
+    }
+
+    .service-panel {
+      background-color: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+      position: relative;
+      z-index: 10;
+    }
+
+    .service-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .service-header h2 {
+      font-size: 24px;
+      color: #333;
+    }
+    
+    .service-header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .service-logo {
+      height: 32px;
+      width: auto;
+      object-fit: contain;
+    }
+    
+    .service-header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .control-icon-button {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: normal;
+      line-height: 28px;
+      transition: all 0.2s ease;
+      padding: 0;
+      margin: 0;
+      font-family: Arial, sans-serif;
+    }
+    
+    .control-icon-button:hover {
+      transform: scale(1.3);
+    }
+    
+    .control-icon-button:active {
+      transform: scale(0.9);
+    }
+    
+    .control-icon-button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .control-icon-button.start {
+      color: #4caf50;
+      font-size: 20px;
+    }
+    
+    .control-icon-button.stop {
+      color: #f44336;
+    }
+    
+    .control-icon-button.restart {
+      color: #ff9800;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      background-color: #f5f5f5;
+      border-radius: 12px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      transition: opacity 0.3s ease;
+    }
+
+    .status-dot.red {
+      background-color: #f44336;
+    }
+
+    .status-dot.orange {
+      background-color: #ff9800;
+    }
+
+    .status-dot.green {
+      background-color: #4caf50;
+    }
+
+    .status-dot.dimmed {
+      opacity: 0.2;
+    }
+
+    .flag-display {
+      margin-bottom: 20px;
+    }
+
+    .flag-display label {
+      font-size: 14px;
+      color: #666;
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .flag-value {
+      font-size: 18px;
+      font-weight: bold;
+      color: #405BFF;
+      padding: 12px;
+      background-color: #f0f2ff;
+      border-radius: 4px;
+    }
+
+    .sdk-config {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 20px;
+    }
+
+    .context-display {
+      margin-top: 20px;
+    }
+
+    .context-display h4 {
+      font-size: 14px;
+      color: #333;
+      margin-bottom: 10px;
+    }
+
+    .context-display button {
+      background-color: #405BFF;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+
+    .context-display button:hover {
+      background-color: #3347cc;
+    }
+
+    .log-console {
+      background-color: #1e1e1e;
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .log-console-header {
+      background-color: #2d2d2d;
+      padding: 8px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .log-console-header h3 {
+      font-size: 12px;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .log-console-header button {
+      background-color: transparent;
+      color: #999;
+      border: 1px solid #444;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .log-console-header button:hover {
+      background-color: #3d3d3d;
+      color: #fff;
+    }
+
+    .log-console-output {
+      flex: 1;
+      padding: 10px;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      color: #d4d4d4;
+      overflow-y: auto;
+      line-height: 1.5;
+    }
+
+    .log-line {
+      margin-bottom: 2px;
+    }
+
+    /* Modal Styles */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1000;
+    }
+
+    .modal.show {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-content {
+      position: relative;
+      background-color: white;
+      border-radius: 8px;
+      padding: 30px;
+      width: 500px;
+      max-width: 90%;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      z-index: 1001;
+    }
+    
+    /* Wider modal for relay status */
+    #relay-status-modal .modal-content {
+      width: 800px;
+      max-width: 95%;
+      max-height: 90vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #relay-status-modal .modal-body {
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .modal-header {
+      margin-bottom: 20px;
+    }
+
+    .modal-header h3 {
+      font-size: 20px;
+      color: #333;
+      margin: 0;
+    }
+
+    .modal-body {
+      margin-bottom: 20px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      color: #333;
+      margin-bottom: 8px;
+      font-weight: 500;
+    }
+
+    .radio-group {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .radio-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .radio-option input[type="radio"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    .radio-option label {
+      font-size: 14px;
+      color: #333;
+      cursor: pointer;
+      margin: 0;
+      font-weight: normal;
+    }
+
+    .form-group input[type="text"],
+    .form-group input[type="email"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    .form-group input[type="text"]:focus,
+    .form-group input[type="email"]:focus {
+      outline: none;
+      border-color: #405BFF;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .modal-footer button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .btn-primary {
+      background-color: #405BFF;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background-color: #3347cc;
+    }
+
+    .btn-secondary {
+      background-color: #f5f5f5;
+      color: #333;
+      border: 1px solid #ddd;
+    }
+
+    .btn-secondary:hover {
+      background-color: #e8e8e8;
+    }
+  </style>
+</head>
+<body>
+  <div class="dashboard-container">
+    <!-- Services Section (Top 60%) -->
+    <div class="services-section">
+      <!-- Node.js Service Panel -->
+      <div class="service-panel" id="node-service-panel">
+        <div class="service-header">
+          <div class="service-header-left">
+            <img src="Node.js_logo.svg.png" alt="Node.js" class="service-logo" />
+            <h2>Node.js Service</h2>
+          </div>
+          <div class="service-header-right">
+            <button id="node-start-button" class="control-icon-button start" title="Start Node.js Service">▶</button>
+            <button id="node-stop-button" class="control-icon-button stop" title="Stop Node.js Service">■</button>
+            <button id="node-restart-button" class="control-icon-button restart" title="Restart Node.js Service">↻</button>
+            <div class="status-indicator" id="node-status">
+              <span class="status-dot red dimmed" id="node-status-red"></span>
+              <span class="status-dot orange dimmed" id="node-status-orange"></span>
+              <span class="status-dot green dimmed" id="node-status-green"></span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="flag-display">
+          <label>Feature Flag: user-message</label>
+          <div class="flag-value" id="node-flag-value">Loading...</div>
+        </div>
+        
+        <div class="sdk-config">
+          <strong>Mode:</strong> <span id="node-sdk-mode">Relay Proxy Mode</span>
+        </div>
+        
+        <div class="context-display">
+          <h4>Current Context</h4>
+          <div id="node-context-info" style="font-size: 13px; line-height: 1.6; color: #555;">
+            <div><strong>Type:</strong> <span id="node-context-type">Anonymous</span></div>
+            <div><strong>Key:</strong> <span id="node-context-key" style="font-family: monospace; font-size: 11px;">Loading...</span></div>
+            <div id="node-context-attributes" style="margin-top: 5px; padding-top: 5px; border-top: 1px solid #eee;">
+              <!-- Attributes will be populated here -->
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <button id="node-context-button">Change Context</button>
+            <button id="node-test-evaluation" class="btn-secondary">Test Flag Evaluation</button>
+          </div>
+        </div>
+        
+        <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+          <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">All Flags (SDK Cache)</h4>
+          <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
+            <strong>Context:</strong> <span id="node-cache-context-display">Loading...</span>
+          </div>
+          <div id="node-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 150px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+            <div style="color: #999; font-style: italic;">Click "View Flags" to load</div>
+          </div>
+          <button id="node-view-cache" class="btn-secondary" style="margin-top: 10px; padding: 8px 16px; font-size: 13px;">View Flags</button>
+        </div>
+      </div>
+
+      <!-- PHP Service Panel -->
+      <div class="service-panel" id="php-service-panel">
+        <div class="service-header">
+          <div class="service-header-left">
+            <img src="new-php-logo.svg" alt="PHP" class="service-logo" />
+            <h2>PHP Service</h2>
+          </div>
+          <div class="service-header-right">
+            <button id="php-start-button" class="control-icon-button start" title="Start PHP Service">▶</button>
+            <button id="php-stop-button" class="control-icon-button stop" title="Stop PHP Service">■</button>
+            <button id="php-restart-button" class="control-icon-button restart" title="Restart PHP Service">↻</button>
+            <div class="status-indicator" id="php-status">
+              <span class="status-dot red dimmed" id="php-status-red"></span>
+              <span class="status-dot orange dimmed" id="php-status-orange"></span>
+              <span class="status-dot green dimmed" id="php-status-green"></span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="flag-display">
+          <label>Feature Flag: user-message</label>
+          <div class="flag-value" id="php-flag-value">Loading...</div>
+        </div>
+        
+        <div class="sdk-config">
+          <strong>Mode:</strong> <span id="php-sdk-mode">Daemon Mode (Redis + Events)</span>
+        </div>
+        
+        <div class="context-display">
+          <h4>Current Context</h4>
+          <div id="php-context-info" style="font-size: 13px; line-height: 1.6; color: #555;">
+            <div><strong>Type:</strong> <span id="php-context-type">Anonymous</span></div>
+            <div><strong>Key:</strong> <span id="php-context-key" style="font-family: monospace; font-size: 11px;">Loading...</span></div>
+            <div id="php-context-attributes" style="margin-top: 5px; padding-top: 5px; border-top: 1px solid #eee;">
+              <!-- Attributes will be populated here -->
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <button id="php-edit-context">Change Context</button>
+            <button id="php-test-evaluation" class="btn-secondary">Test Flag Evaluation</button>
+          </div>
+        </div>
+        
+        <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+          <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">All Flags (Redis Store)</h4>
+          <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
+            <strong>Context:</strong> <span id="php-cache-context-display">Loading...</span>
+          </div>
+          <div id="php-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 150px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+            <div style="color: #999; font-style: italic;">Click "View Flags" to load</div>
+          </div>
+          <button id="php-view-cache" class="btn-secondary" style="margin-top: 10px; padding: 8px 16px; font-size: 13px;">View Flags</button>
+        </div>
+      </div>
+
+      <!-- Relay Proxy Enterprise Panel -->
+      <div class="service-panel" id="relay-proxy-panel">
+        <div class="service-header">
+          <div class="service-header-left">
+            <img src="launchdarkly-logo.svg" alt="LaunchDarkly" class="service-logo" />
+            <h2>Relay Proxy Enterprise</h2>
+          </div>
+          <div class="service-header-right">
+            <button id="relay-proxy-start-button" class="control-icon-button start" title="Start Relay Proxy">▶</button>
+            <button id="relay-proxy-stop-button" class="control-icon-button stop" title="Stop Relay Proxy">■</button>
+            <button id="relay-proxy-restart-button" class="control-icon-button restart" title="Restart Relay Proxy">↻</button>
+            <div class="status-indicator" id="relay-proxy-status">
+              <span class="status-dot red dimmed" id="relay-proxy-status-red"></span>
+              <span class="status-dot orange dimmed" id="relay-proxy-status-orange"></span>
+              <span class="status-dot green dimmed" id="relay-proxy-status-green"></span>
+            </div>
+          </div>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+          <div style="font-size: 14px; color: #666; margin-bottom: 10px;">
+            <strong>Status:</strong> <span id="relay-proxy-status-text">Checking...</span>
+          </div>
+          <div style="font-size: 14px; color: #666;">
+            <strong>Mode:</strong> Enterprise Relay Proxy
+          </div>
+        </div>
+        
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button id="relay-status-button" class="btn-secondary" style="width: 100%; padding: 12px 20px; border: 1px solid #ddd; border-radius: 4px; background-color: white; cursor: pointer; font-size: 14px; font-weight: 500;">
+            📊 View Detailed Status
+          </button>
+          
+          <button id="load-test-button" class="btn-secondary" style="width: 100%; padding: 12px 20px; border: 1px solid #ddd; border-radius: 4px; background-color: white; cursor: pointer; font-size: 14px; font-weight: 500;">
+            ⚡ Run Load Test
+          </button>
+        </div>
+        
+        <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; font-size: 13px; color: #666;">
+          <strong>About</strong>
+          <p style="margin: 10px 0 0 0;">The Relay Proxy caches feature flags and forwards events to LaunchDarkly, providing low latency and high availability.</p>
+        </div>
+      </div>
+
+      <!-- Redis Panel -->
+      <div class="service-panel" id="redis-panel">
+        <div class="service-header">
+          <div class="service-header-left">
+            <img src="Redis_logo.svg.png" alt="Redis" class="service-logo" />
+            <h2>Redis</h2>
+          </div>
+          <div class="service-header-right">
+            <button id="redis-start-button" class="control-icon-button start" title="Start Redis">▶</button>
+            <button id="redis-stop-button" class="control-icon-button stop" title="Stop Redis">■</button>
+            <button id="redis-restart-button" class="control-icon-button restart" title="Restart Redis">↻</button>
+            <div class="status-indicator" id="redis-status">
+              <span class="status-dot red dimmed" id="redis-status-red"></span>
+              <span class="status-dot orange dimmed" id="redis-status-orange"></span>
+              <span class="status-dot green dimmed" id="redis-status-green"></span>
+            </div>
+          </div>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+          <div style="font-size: 14px; color: #666; margin-bottom: 10px;">
+            <strong>Status:</strong> <span id="redis-status-text">Checking...</span>
+          </div>
+          <div style="font-size: 14px; color: #666;">
+            <strong>Port:</strong> 6379
+          </div>
+        </div>
+        
+        <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; font-size: 13px; color: #666;">
+          <strong>About</strong>
+          <p style="margin: 10px 0 0 0;">Redis stores feature flag data for the PHP SDK (daemon mode) and the Relay Proxy, enabling fast flag evaluations.</p>
+        </div>
+        
+        <div style="margin-top: 20px;">
+          <div style="font-size: 13px; color: #666; margin-bottom: 10px;">
+            <strong>Used By:</strong>
+          </div>
+          <div style="font-size: 12px; color: #999;">
+            • PHP SDK (Daemon Mode)<br>
+            • Relay Proxy (Cache)
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs Section (Bottom 40%) -->
+    <div class="logs-section">
+      <!-- Node App Dev Log Console -->
+      <div class="log-console" id="node-app-dev-console">
+        <div class="log-console-header">
+          <h3>node-app-dev</h3>
+          <button id="node-app-dev-clear">Clear</button>
+        </div>
+        <div class="log-console-output" id="node-app-dev-output"></div>
+      </div>
+
+      <!-- PHP App Dev Log Console -->
+      <div class="log-console" id="php-app-dev-console">
+        <div class="log-console-header">
+          <h3>php-app-dev</h3>
+          <button id="php-app-dev-clear">Clear</button>
+        </div>
+        <div class="log-console-output" id="php-app-dev-output"></div>
+      </div>
+
+      <!-- Relay Proxy Log Console -->
+      <div class="log-console" id="relay-proxy-console">
+        <div class="log-console-header">
+          <h3>relay-proxy</h3>
+          <button id="relay-proxy-clear">Clear</button>
+        </div>
+        <div class="log-console-output" id="relay-proxy-output"></div>
+      </div>
+
+      <!-- Redis Monitor Console -->
+      <div class="log-console" id="redis-monitor-console">
+        <div class="log-console-header">
+          <h3>redis-monitor</h3>
+          <button id="redis-monitor-clear">Clear</button>
+        </div>
+        <div class="log-console-output" id="redis-monitor-output"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Relay Proxy Status Modal -->
+  <div id="relay-status-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Relay Proxy Status</h3>
+      </div>
+      <div class="modal-body">
+        <div id="relay-status-content">
+          <p>Loading status...</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="relay-status-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Load Test Modal -->
+  <div id="load-test-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Load Test</h3>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="load-test-requests">Number of Requests</label>
+          <input type="text" id="load-test-requests" placeholder="100" value="100">
+        </div>
+        
+        <div class="form-group">
+          <label for="load-test-concurrency">Concurrency</label>
+          <input type="text" id="load-test-concurrency" placeholder="10" value="10">
+        </div>
+        
+        <div class="form-group">
+          <label for="load-test-service">Target Service</label>
+          <div class="radio-group">
+            <div class="radio-option">
+              <input type="radio" id="load-test-node" name="load-test-service" value="node" checked>
+              <label for="load-test-node">Node.js</label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="load-test-php" name="load-test-service" value="php">
+              <label for="load-test-php">PHP</label>
+            </div>
+          </div>
+        </div>
+        
+        <div id="load-test-output" style="margin-top: 20px; padding: 10px; background-color: #f5f5f5; border-radius: 4px; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; display: none;">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="load-test-close">Close</button>
+        <button type="button" class="btn-primary" id="load-test-start">Start Test</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Context Editor Modal -->
+  <div id="context-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Edit User Context</h3>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Context Type</label>
+          <div class="radio-group">
+            <div class="radio-option">
+              <input type="radio" id="context-type-anonymous" name="context-type" value="anonymous" checked onchange="toggleContextFields()">
+              <label for="context-type-anonymous">Anonymous</label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="context-type-custom" name="context-type" value="custom" onchange="toggleContextFields()">
+              <label for="context-type-custom">Custom</label>
+            </div>
+          </div>
+        </div>
+        
+        <div id="custom-context-fields" style="display: none;">
+          <div class="form-group">
+            <label for="context-email">Email</label>
+            <input type="email" id="context-email" placeholder="user@example.com">
+          </div>
+          
+          <div class="form-group">
+            <label for="context-name">Name</label>
+            <input type="text" id="context-name" placeholder="John Doe">
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label for="context-location">Location (optional)</label>
+          <input type="text" id="context-location" placeholder="Detecting location...">
+          <div id="location-status" style="margin-top: 5px; font-size: 12px; color: #666;">Detecting location...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="modal-cancel">Cancel</button>
+        <button type="button" class="btn-primary" id="modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Global location variable
+    let detectedLocation = '';
+    
+    // Function to toggle context fields based on type
+    function toggleContextFields() {
+      const contextType = document.querySelector('input[name="context-type"]:checked').value;
+      const customFields = document.getElementById('custom-context-fields');
+      
+      if (contextType === 'custom') {
+        customFields.style.display = 'block';
+      } else {
+        customFields.style.display = 'none';
+        // Clear custom fields when switching to anonymous
+        document.getElementById('context-email').value = '';
+        document.getElementById('context-name').value = '';
+      }
+    }
+    
+    // Function to detect location automatically
+    async function detectLocation() {
+      const locationInput = document.getElementById('context-location');
+      const locationStatus = document.getElementById('location-status');
+      
+      // If we already detected location, just populate it
+      if (detectedLocation) {
+        locationInput.value = detectedLocation;
+        locationStatus.textContent = `Location detected (you can edit)`;
+        locationStatus.style.color = '#405BFF';
+        return;
+      }
+      
+      // Update status to show we're trying
+      locationStatus.textContent = 'Detecting location...';
+      locationStatus.style.color = '#666';
+      
+      if ('geolocation' in navigator) {
+        try {
+          const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              timeout: 10000,
+              maximumAge: 0,
+              enableHighAccuracy: false
+            });
+          });
+          
+          const latitude = position.coords.latitude;
+          const longitude = position.coords.longitude;
+          
+          try {
+            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+            const data = await response.json();
+            
+            const city = data.address.city || data.address.town || data.address.village || data.address.county;
+            const country = data.address.country;
+            detectedLocation = city && country ? `${city}, ${country}` : data.display_name;
+            
+            locationInput.value = detectedLocation;
+            locationStatus.textContent = `Location detected: ${detectedLocation} (you can edit)`;
+            locationStatus.style.color = '#405BFF';
+          } catch (error) {
+            console.error('Geocoding error:', error);
+            detectedLocation = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+            locationInput.value = detectedLocation;
+            locationStatus.textContent = `Location detected: ${detectedLocation} (you can edit)`;
+            locationStatus.style.color = '#405BFF';
+          }
+        } catch (error) {
+          console.error('Geolocation error:', error);
+          
+          // Make field editable and provide helpful message
+          locationInput.placeholder = 'Enter your location (e.g., San Francisco, CA)';
+          
+          // Determine error type - but keep message friendly
+          let errorMsg = '';
+          if (error.code === 1) {
+            errorMsg = 'Location auto-detection not permitted';
+          } else if (error.code === 2) {
+            errorMsg = 'Location auto-detection unavailable';
+          } else if (error.code === 3) {
+            errorMsg = 'Location detection timed out';
+          } else {
+            errorMsg = 'Location auto-detection not available';
+          }
+          
+          locationStatus.innerHTML = `<span style="color: #666;">${errorMsg}</span> - <span style="color: #405BFF;">Enter manually</span> <span style="font-size: 11px; color: #999;">(optional)</span>`;
+        }
+      } else {
+        locationInput.placeholder = 'Enter your location (e.g., San Francisco, CA)';
+        locationStatus.innerHTML = '<span style="color: #666;">Location auto-detection not supported</span> - <span style="color: #405BFF;">Enter manually</span> <span style="font-size: 11px; color: #999;">(optional)</span>';
+      }
+    }
+    
+    // LogConsole class for managing log console displays
+    class LogConsole {
+      constructor(containerId, elementId, updateMethod) {
+        this.containerId = containerId;
+        this.elementId = elementId;
+        this.updateMethod = updateMethod; // 'polling' or 'sse'
+        this.maxLines = 50;
+        this.lines = [];
+        this.eventSource = null;
+        this.pollingInterval = null;
+      }
+      
+      // Start log streaming
+      start() {
+        if (this.updateMethod === 'sse') {
+          this.startSSE();
+        } else {
+          this.startPolling();
+        }
+      }
+      
+      // Start SSE connection (for Redis monitor)
+      startSSE() {
+        this.eventSource = new EventSource(`http://localhost:4000/api/redis/monitor`);
+        this.eventSource.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          // Filter out PING commands (data.command for Redis monitor, data.message for others)
+          const content = data.command || data.message || '';
+          if (!content.toLowerCase().includes('"ping"')) {
+            this.appendLine(content);
+          }
+        };
+        
+        this.eventSource.onerror = (error) => {
+          console.error(`SSE error for ${this.containerId}:`, error);
+          // Close and attempt to reconnect
+          if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+          }
+          // Reconnect after 5 seconds
+          setTimeout(() => {
+            this.startSSE();
+          }, 5000);
+        };
+      }
+      
+      // Start polling (for Docker logs)
+      startPolling() {
+        const poll = async () => {
+          try {
+            const response = await fetch(`http://localhost:4000/api/logs/${this.containerId}`);
+            const data = await response.json();
+            if (data.lines && Array.isArray(data.lines)) {
+              this.setLines(data.lines);
+            }
+          } catch (error) {
+            console.error(`Error polling logs for ${this.containerId}:`, error);
+          }
+        };
+        
+        // Poll immediately, then every 2 seconds
+        poll();
+        this.pollingInterval = setInterval(poll, 2000);
+      }
+      
+      // Append a single line
+      appendLine(line) {
+        this.lines.push(line);
+        if (this.lines.length > this.maxLines) {
+          this.lines.shift();
+        }
+        this.render();
+      }
+      
+      // Set all lines (for polling)
+      setLines(lines) {
+        this.lines = lines.slice(-this.maxLines);
+        this.render();
+      }
+      
+      // Render lines to DOM
+      render() {
+        const element = document.getElementById(this.elementId);
+        if (!element) {
+          console.error(`Element ${this.elementId} not found`);
+          return;
+        }
+        
+        element.innerHTML = this.lines.map(line => {
+          const timestamp = new Date().toLocaleTimeString();
+          return `<div class="log-line">[${timestamp}] ${this.escapeHtml(line)}</div>`;
+        }).join('');
+        
+        // Auto-scroll to bottom
+        element.scrollTop = element.scrollHeight;
+      }
+      
+      // Escape HTML to prevent XSS
+      escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+      
+      // Clear console
+      async clear() {
+        // Clear the display immediately
+        this.lines = [];
+        this.render();
+        
+        // Call backend to actually clear the Docker container logs
+        // (only for Docker log consoles, not for Redis monitor which uses SSE)
+        if (this.updateMethod === 'polling') {
+          try {
+            const response = await fetch(`http://localhost:4000/api/logs/${this.containerId}/clear`, {
+              method: 'POST'
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              console.log(`Container logs cleared: ${data.message}`);
+            } else {
+              const error = await response.json();
+              console.error(`Failed to clear container logs: ${error.error}`);
+            }
+          } catch (error) {
+            console.error(`Error clearing container logs for ${this.containerId}:`, error);
+          }
+        }
+      }
+      
+      // Stop streaming/polling
+      stop() {
+        if (this.eventSource) {
+          this.eventSource.close();
+          this.eventSource = null;
+        }
+        if (this.pollingInterval) {
+          clearInterval(this.pollingInterval);
+          this.pollingInterval = null;
+        }
+      }
+    }
+
+    // ContextEditorModal class for managing context editor modal
+    class ContextEditorModal {
+      constructor(servicePanel) {
+        this.servicePanel = servicePanel;
+        this.modalElement = null;
+      }
+      
+      // Open modal with current context
+      open() {
+        this.modalElement = document.getElementById('context-modal');
+        if (!this.modalElement) {
+          console.error('Context modal element not found');
+          return;
+        }
+        
+        this.populateForm(this.servicePanel.currentContext);
+        this.modalElement.classList.add('show');
+        
+        // Set the modal's service ID for reference
+        this.modalElement.dataset.serviceId = this.servicePanel.serviceId;
+        
+        // Automatically detect location when modal opens
+        detectLocation();
+      }
+      
+      // Close modal
+      close() {
+        if (this.modalElement) {
+          this.modalElement.classList.remove('show');
+        }
+      }
+      
+      // Populate form with context data
+      populateForm(context) {
+        if (context.type === 'anonymous') {
+          const anonymousRadio = document.getElementById('context-type-anonymous');
+          if (anonymousRadio) {
+            anonymousRadio.checked = true;
+          }
+          // Hide custom fields for anonymous
+          toggleContextFields();
+          
+          // Set location if available
+          const locationInput = document.getElementById('context-location');
+          if (locationInput && context.location) {
+            locationInput.value = context.location;
+          }
+        } else {
+          const customRadio = document.getElementById('context-type-custom');
+          if (customRadio) {
+            customRadio.checked = true;
+          }
+          // Show custom fields
+          toggleContextFields();
+          
+          // Populate custom fields
+          const emailInput = document.getElementById('context-email');
+          const nameInput = document.getElementById('context-name');
+          const locationInput = document.getElementById('context-location');
+          if (emailInput) emailInput.value = context.email || '';
+          if (nameInput) nameInput.value = context.name || '';
+          if (locationInput) locationInput.value = context.location || '';
+        }
+      }
+      
+      // Validate email format
+      validateEmail(email) {
+        if (!email) return true; // Empty is valid for anonymous
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
+      }
+      
+      // Save context
+      async save() {
+        console.log('ContextEditorModal.save() called');
+        
+        const typeRadio = document.querySelector('input[name="context-type"]:checked');
+        if (!typeRadio) {
+          alert('Please select a context type');
+          return;
+        }
+        
+        const type = typeRadio.value;
+        console.log('Context type:', type);
+        
+        const context = { type };
+        
+        // Get location field (available for both anonymous and custom)
+        const locationInput = document.getElementById('context-location');
+        const location = locationInput ? locationInput.value.trim() : '';
+        
+        if (type === 'custom') {
+          const emailInput = document.getElementById('context-email');
+          const nameInput = document.getElementById('context-name');
+          
+          const email = emailInput ? emailInput.value.trim() : '';
+          const name = nameInput ? nameInput.value.trim() : '';
+          
+          console.log('Custom context - email:', email, 'name:', name, 'location:', location);
+          
+          // Email is required for custom context
+          if (!email) {
+            alert('Email is required for custom context');
+            return;
+          }
+          
+          // Validate email format
+          if (!this.validateEmail(email)) {
+            alert('Please enter a valid email address');
+            return;
+          }
+          
+          context.email = email;
+          context.name = name;
+          if (location) {
+            context.location = location;
+          }
+        } else {
+          // Anonymous context
+          console.log('Anonymous context - location:', location);
+          if (location) {
+            context.location = location;
+          }
+        }
+        
+        console.log('Saving context:', context);
+        const success = await this.servicePanel.saveContext(context);
+        console.log('Save result:', success);
+        
+        if (success) {
+          this.close();
+        }
+      }
+    }
+
+    // ServicePanel class for managing individual service panels
+    class ServicePanel {
+      constructor(serviceId, apiBaseUrl) {
+        this.serviceId = serviceId; // 'node' or 'php'
+        this.apiBaseUrl = apiBaseUrl;
+        this.eventSource = null;
+        this.currentContext = { type: 'anonymous' };
+        this.reconnectAttempts = 0;
+        this.reconnectTimeout = null;
+        this.maxReconnectDelay = 60000; // 60 seconds max
+        this.statusPollingInterval = null;
+      }
+      
+      // Connect to SSE stream for real-time flag updates
+      connectStream() {
+        // Pass context key in URL to ensure same context is used
+        const contextKey = encodeURIComponent(this.currentContext.key);
+        const url = `${this.apiBaseUrl}/message/stream?contextKey=${contextKey}`;
+        console.log(`[${this.serviceId}] Connecting to SSE stream: ${url}`);
+        this.eventSource = new EventSource(url);
+        
+        this.eventSource.onmessage = (event) => {
+          console.log(`[${this.serviceId}] SSE message received:`, event.data);
+          const data = JSON.parse(event.data);
+          console.log(`[${this.serviceId}] Parsed message:`, data.message);
+          this.updateFlagValue(data.message);
+          // Reset reconnect attempts on successful message
+          this.reconnectAttempts = 0;
+        };
+        
+        this.eventSource.onerror = (error) => {
+          console.error(`SSE error for ${this.serviceId}:`, error);
+          this.updateStatusIndicator(false);
+          this.updateFlagValue('Service unavailable');
+          
+          // Close the current connection
+          if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+          }
+          
+          // Attempt to reconnect with exponential backoff
+          this.scheduleReconnect();
+        };
+        
+        this.eventSource.onopen = () => {
+          console.log(`SSE connection opened for ${this.serviceId}`);
+          this.updateStatusIndicator(true);
+          // Reset reconnect attempts on successful connection
+          this.reconnectAttempts = 0;
+        };
+      }
+      
+      // Schedule reconnection with exponential backoff
+      scheduleReconnect() {
+        // Clear any existing reconnect timeout
+        if (this.reconnectTimeout) {
+          clearTimeout(this.reconnectTimeout);
+        }
+        
+        // Calculate delay: 5s, 10s, 20s, 40s, max 60s
+        const baseDelay = 5000; // 5 seconds
+        const delay = Math.min(
+          baseDelay * Math.pow(2, this.reconnectAttempts),
+          this.maxReconnectDelay
+        );
+        
+        console.log(`Scheduling reconnect for ${this.serviceId} in ${delay}ms (attempt ${this.reconnectAttempts + 1})`);
+        
+        this.reconnectTimeout = setTimeout(() => {
+          this.reconnectAttempts++;
+          console.log(`Attempting to reconnect ${this.serviceId} (attempt ${this.reconnectAttempts})`);
+          this.connectStream();
+        }, delay);
+      }
+      
+      // Update status indicator
+      updateStatusIndicator(connected) {
+        const status = connected ? 'connected' : 'disconnected';
+        updatePillStatus(this.serviceId, status);
+      }
+      
+      // Update the displayed feature flag value
+      updateFlagValue(value) {
+        const flagElement = document.getElementById(`${this.serviceId}-flag-value`);
+        if (flagElement) {
+          flagElement.textContent = value;
+        }
+      }
+      
+      // Open context editor modal
+      openContextEditor() {
+        if (!this.contextModal) {
+          this.contextModal = new ContextEditorModal(this);
+        }
+        this.contextModal.open();
+      }
+      
+      // Save new context and reconnect stream
+      async saveContext(context) {
+        try {
+          const response = await fetch(`${this.apiBaseUrl}/context`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',  // Use same session as SSE stream
+            body: JSON.stringify(context)
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            
+            // Use the context returned from the server to ensure we have what was actually saved
+            if (data.context) {
+              this.currentContext = data.context;
+              console.log(`Context saved successfully for ${this.serviceId}:`, this.currentContext);
+            } else {
+              // Fallback to the context we sent if server doesn't return it
+              this.currentContext = context;
+            }
+            
+            this.updateContextDisplay();
+            this.reconnectStream();
+            
+            // Automatically refresh the flags cache after context change
+            await this.fetchAndDisplayCache();
+            
+            // Show success message with context details
+            const contextDetails = [];
+            if (this.currentContext.type === 'anonymous') {
+              contextDetails.push('Type: Anonymous');
+            } else {
+              contextDetails.push('Type: Custom');
+              if (this.currentContext.email) contextDetails.push(`Email: ${this.currentContext.email}`);
+              if (this.currentContext.name) contextDetails.push(`Name: ${this.currentContext.name}`);
+            }
+            if (this.currentContext.location) {
+              contextDetails.push(`Location: ${this.currentContext.location} ✓`);
+            }
+            
+            console.log(`✓ Context updated:\n${contextDetails.join('\n')}`);
+            return true;
+          } else {
+            const errorData = await response.json().catch(() => ({}));
+            const errorMessage = errorData.error || `Failed to save context (${response.status})`;
+            console.error(`Failed to save context for ${this.serviceId}:`, errorMessage);
+            alert(`Failed to save context: ${errorMessage}`);
+            return false;
+          }
+        } catch (error) {
+          console.error(`Error saving context for ${this.serviceId}:`, error);
+          alert(`Error saving context: ${error.message}`);
+          return false;
+        }
+      }
+      
+      // Update the context display in the UI
+      updateContextDisplay() {
+        // Update type
+        const contextTypeElement = document.getElementById(`${this.serviceId}-context-type`);
+        if (contextTypeElement) {
+          contextTypeElement.textContent = this.currentContext.type === 'anonymous' ? 'Anonymous' : 'Custom';
+        }
+        
+        // Update key
+        const contextKeyElement = document.getElementById(`${this.serviceId}-context-key`);
+        if (contextKeyElement) {
+          contextKeyElement.textContent = this.currentContext.key || 'Not set';
+        }
+        
+        // Update attributes
+        const contextAttributesElement = document.getElementById(`${this.serviceId}-context-attributes`);
+        if (contextAttributesElement) {
+          const attributes = [];
+          
+          if (this.currentContext.email) {
+            attributes.push(`<div><strong>Email:</strong> ${this.escapeHtml(this.currentContext.email)}</div>`);
+          }
+          if (this.currentContext.name) {
+            attributes.push(`<div><strong>Name:</strong> ${this.escapeHtml(this.currentContext.name)}</div>`);
+          }
+          if (this.currentContext.location) {
+            attributes.push(`<div><strong>Location:</strong> 📍 ${this.escapeHtml(this.currentContext.location)}</div>`);
+          }
+          
+          if (attributes.length > 0) {
+            contextAttributesElement.innerHTML = attributes.join('');
+            contextAttributesElement.style.display = 'block';
+          } else {
+            contextAttributesElement.innerHTML = '<div style="color: #999; font-style: italic;">No additional attributes</div>';
+            contextAttributesElement.style.display = 'block';
+          }
+        }
+      }
+      
+      // Escape HTML to prevent XSS
+      escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+      
+      // Reconnect SSE stream with new context
+      reconnectStream() {
+        // Clear any pending reconnect timeout
+        if (this.reconnectTimeout) {
+          clearTimeout(this.reconnectTimeout);
+          this.reconnectTimeout = null;
+        }
+        
+        // Reset reconnect attempts
+        this.reconnectAttempts = 0;
+        
+        // Close existing connection
+        if (this.eventSource) {
+          this.eventSource.close();
+          this.eventSource = null;
+        }
+        
+        // Establish new connection
+        this.connectStream();
+      }
+      
+      // Poll service status
+      async pollStatus() {
+        try {
+          const response = await fetch(`http://localhost:4000/api/${this.serviceId}/status`);
+          const data = await response.json();
+          
+          // Update status indicator based on health
+          this.updateStatusIndicator(data.connected);
+          
+          // Update SDK mode display
+          const sdkModeElement = document.getElementById(`${this.serviceId}-sdk-mode`);
+          if (sdkModeElement && data.mode) {
+            sdkModeElement.textContent = data.mode;
+          }
+          
+        } catch (error) {
+          console.error(`Error polling status for ${this.serviceId}:`, error);
+          this.updateStatusIndicator(false);
+        }
+      }
+      
+      // Fetch current context from server
+      async fetchCurrentContext() {
+        try {
+          const response = await fetch(`${this.apiBaseUrl}/context`, {
+            credentials: 'include'  // Use same session as SSE stream
+          });
+          if (response.ok) {
+            const context = await response.json();
+            const contextChanged = JSON.stringify(this.currentContext) !== JSON.stringify(context);
+            this.currentContext = context;
+            this.updateContextDisplay();
+            console.log(`[${this.serviceId}] Current context loaded:`, context);
+            
+            // If context changed and SSE is already connected, reconnect to use new context
+            if (contextChanged && this.eventSource) {
+              console.log(`[${this.serviceId}] Context changed, reconnecting SSE stream`);
+              this.reconnectStream();
+            }
+          } else {
+            console.error(`Failed to fetch context for ${this.serviceId}`);
+            this.updateFlagValue('Service unavailable');
+            // Update context display to show error state
+            const contextKeyElement = document.getElementById(`${this.serviceId}-context-key`);
+            if (contextKeyElement) {
+              contextKeyElement.textContent = 'Service unavailable';
+            }
+          }
+        } catch (error) {
+          console.error(`Error fetching context for ${this.serviceId}:`, error);
+          this.updateFlagValue('Service unavailable');
+          // Update context display to show error state
+          const contextKeyElement = document.getElementById(`${this.serviceId}-context-key`);
+          if (contextKeyElement) {
+            contextKeyElement.textContent = 'Service unavailable';
+          }
+        }
+      }
+      
+      // Start status polling (every 5 seconds)
+      startStatusPolling() {
+        // Poll status immediately
+        this.pollStatus();
+        
+        // Fetch current context if not already loaded
+        if (!this.currentContext || !this.currentContext.key) {
+          this.fetchCurrentContext();
+        }
+        
+        // Then poll every 5 seconds
+        this.statusPollingInterval = setInterval(() => {
+          this.pollStatus();
+        }, 5000);
+      }
+      
+      // Stop status polling
+      stopStatusPolling() {
+        if (this.statusPollingInterval) {
+          clearInterval(this.statusPollingInterval);
+          this.statusPollingInterval = null;
+        }
+      }
+      
+      // Fetch and display SDK cache (all flags)
+      async fetchAndDisplayCache() {
+        const cacheButton = document.getElementById(`${this.serviceId}-view-cache`);
+        const cacheElement = document.getElementById(`${this.serviceId}-sdk-cache`);
+        const contextDisplayElement = document.getElementById(`${this.serviceId}-cache-context-display`);
+        
+        if (!cacheElement) {
+          console.error(`Cache element not found for ${this.serviceId}`);
+          return;
+        }
+        
+        // Update context display
+        if (contextDisplayElement && this.currentContext) {
+          const contextType = this.currentContext.type === 'anonymous' ? 'Anonymous' : 'Custom';
+          const contextKey = this.currentContext.key || 'Unknown';
+          contextDisplayElement.innerHTML = `${contextType} (<code style="font-size: 11px; background: #f0f0f0; padding: 2px 4px; border-radius: 2px;">${this.escapeHtml(contextKey)}</code>)`;
+        }
+        
+        // Disable button and show loading state
+        if (cacheButton) {
+          cacheButton.disabled = true;
+          cacheButton.textContent = 'Loading...';
+        }
+        
+        try {
+          // Send current context in request body to ensure consistency with test evaluation
+          const response = await fetch(`${this.apiBaseUrl}/all-flags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              context: this.currentContext
+            })
+          });
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          
+          const data = await response.json();
+          
+          if (data.success && data.flags) {
+            const flags = data.flags;
+            const flagKeys = Object.keys(flags);
+            
+            let html = '';
+            
+            // Show context info if available
+            if (data.context) {
+              html += '<div style="margin-bottom: 10px; padding: 8px; background-color: #f0f2ff; border-radius: 3px; font-size: 11px;">';
+              html += `<strong>Context:</strong> ${data.context.type === 'anonymous' ? 'Anonymous' : 'Custom'} `;
+              html += `<span style="font-family: monospace;">(${this.escapeHtml(data.context.key)})</span>`;
+              html += '</div>';
+            }
+            
+            if (flagKeys.length === 0) {
+              html += '<div style="color: #999; font-style: italic;">No flags in cache</div>';
+            } else {
+              html += '<div style="font-family: monospace;">';
+              flagKeys.forEach(key => {
+                const value = flags[key];
+                const valueStr = typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
+                html += `<div style="margin-bottom: 8px; padding: 6px; background-color: white; border-radius: 3px; border: 1px solid #e0e0e0;">`;
+                html += `<strong style="color: #405BFF;">${this.escapeHtml(key)}:</strong> `;
+                html += `<span style="color: #333;">${this.escapeHtml(valueStr)}</span>`;
+                html += `</div>`;
+              });
+              html += '</div>';
+            }
+            cacheElement.innerHTML = html;
+          } else {
+            cacheElement.innerHTML = `<div style="color: #f44336;">Error: ${data.error || 'Failed to fetch flags'}</div>`;
+          }
+        } catch (error) {
+          console.error(`Error fetching SDK cache for ${this.serviceId}:`, error);
+          cacheElement.innerHTML = `<div style="color: #f44336;">Error: ${error.message}</div>`;
+        } finally {
+          // Re-enable button
+          if (cacheButton) {
+            cacheButton.disabled = false;
+            cacheButton.textContent = 'Refresh Flags';
+          }
+        }
+      }
+    }
+
+    // Initialize service panels when DOM is loaded
+    let nodePanel, phpPanel;
+    let appDevConsole, phpAppDevConsole, relayProxyConsole, redisMonitorConsole;
+    
+    // Helper function to update pill status indicator
+    function updatePillStatus(serviceId, status) {
+      const redDot = document.getElementById(`${serviceId}-status-red`);
+      const orangeDot = document.getElementById(`${serviceId}-status-orange`);
+      const greenDot = document.getElementById(`${serviceId}-status-green`);
+      
+      if (!redDot || !orangeDot || !greenDot) return;
+      
+      // Dim all dots first
+      redDot.classList.add('dimmed');
+      orangeDot.classList.add('dimmed');
+      greenDot.classList.add('dimmed');
+      
+      // Brighten the active status
+      if (status === 'disconnected' || status === 'stopped') {
+        redDot.classList.remove('dimmed');
+      } else if (status === 'degraded') {
+        orangeDot.classList.remove('dimmed');
+      } else if (status === 'connected' || status === 'running') {
+        greenDot.classList.remove('dimmed');
+      }
+    }
+    
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Create service panel instances
+      console.log('[Dashboard] Creating service panels...');
+      nodePanel = new ServicePanel('node', 'http://localhost:3000/api/node');
+      console.log('[Dashboard] Node panel created');
+      phpPanel = new ServicePanel('php', 'http://localhost:4000/api/php');
+      console.log('[Dashboard] PHP panel created');
+      
+      // Update relay proxy status by fetching via backend proxy (CORS workaround)
+      async function updateRelayProxyStatus() {
+        try {
+          const response = await fetch('http://localhost:4000/api/relay-status');
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          
+          const data = await response.json();
+          
+          const statusIndicator = document.getElementById('relay-proxy-status');
+          const statusText = document.getElementById('relay-proxy-status-text');
+          const startButton = document.getElementById('relay-proxy-start-button');
+          const stopButton = document.getElementById('relay-proxy-stop-button');
+          const restartButton = document.getElementById('relay-proxy-restart-button');
+          
+          // Check if Redis is available
+          if (data.redisAvailable === false) {
+            // Redis is down - show degraded status
+            updatePillStatus('relay-proxy', 'degraded');
+            statusText.textContent = `Degraded - Redis Unavailable${data.version ? ' - v' + data.version : ''}`;
+            statusText.style.color = '#ff9800';
+            
+            // Show stop and restart buttons (Relay Proxy is running but degraded)
+            if (startButton) startButton.style.display = 'none';
+            if (stopButton) stopButton.style.display = 'flex';
+            if (restartButton) restartButton.style.display = 'flex';
+          } else if (data.status === 'degraded') {
+            // Other degraded state
+            updatePillStatus('relay-proxy', 'degraded');
+            statusText.textContent = `Degraded${data.version ? ' - v' + data.version : ''}`;
+            statusText.style.color = '#ff9800';
+            
+            // Show stop and restart buttons
+            if (startButton) startButton.style.display = 'none';
+            if (stopButton) stopButton.style.display = 'flex';
+            if (restartButton) restartButton.style.display = 'flex';
+          } else {
+            // Healthy
+            updatePillStatus('relay-proxy', 'connected');
+            statusText.textContent = `Connected${data.version ? ' - v' + data.version : ''}`;
+            statusText.style.color = '#4caf50';
+            
+            // Show stop and restart buttons
+            if (startButton) startButton.style.display = 'none';
+            if (stopButton) stopButton.style.display = 'flex';
+            if (restartButton) restartButton.style.display = 'flex';
+          }
+          
+        } catch (error) {
+          const statusIndicator = document.getElementById('relay-proxy-status');
+          const statusText = document.getElementById('relay-proxy-status-text');
+          const startButton = document.getElementById('relay-proxy-start-button');
+          const stopButton = document.getElementById('relay-proxy-stop-button');
+          const restartButton = document.getElementById('relay-proxy-restart-button');
+          
+          updatePillStatus('relay-proxy', 'disconnected');
+          statusText.textContent = 'Disconnected';
+          statusText.style.color = '#f44336';
+          
+          // Show start button, hide stop and restart when disconnected
+          if (startButton) startButton.style.display = 'flex';
+          if (stopButton) stopButton.style.display = 'none';
+          if (restartButton) restartButton.style.display = 'none';
+        }
+      }
+      
+      // Poll Redis status
+      async function pollRedisStatus() {
+        try {
+          const response = await fetch('http://localhost:4000/api/redis/status');
+          const statusIndicator = document.getElementById('redis-status');
+          const statusText = document.getElementById('redis-status-text');
+          const startButton = document.getElementById('redis-start-button');
+          const stopButton = document.getElementById('redis-stop-button');
+          const restartButton = document.getElementById('redis-restart-button');
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.connected && data.running) {
+              // Redis is running
+              updatePillStatus('redis', 'connected');
+              statusText.textContent = 'Running';
+              statusText.style.color = '#4caf50';
+              
+              // Show stop and restart buttons, hide start
+              if (startButton) startButton.style.display = 'none';
+              if (stopButton) stopButton.style.display = 'flex';
+              if (restartButton) restartButton.style.display = 'flex';
+            } else if (data.running === false) {
+              // Redis container exists but is stopped
+              updatePillStatus('redis', 'stopped');
+              statusText.textContent = 'Stopped';
+              statusText.style.color = '#999';
+              
+              // Show start button, hide stop and restart
+              if (startButton) startButton.style.display = 'flex';
+              if (stopButton) stopButton.style.display = 'none';
+              if (restartButton) restartButton.style.display = 'none';
+            } else {
+              // Redis is not responding
+              updatePillStatus('redis', 'disconnected');
+              statusText.textContent = 'Disconnected';
+              statusText.style.color = '#f44336';
+              
+              // Show all buttons
+              if (startButton) startButton.style.display = 'flex';
+              if (stopButton) stopButton.style.display = 'flex';
+              if (restartButton) restartButton.style.display = 'flex';
+            }
+          } else {
+            updatePillStatus('redis', 'disconnected');
+            statusText.textContent = 'Disconnected';
+            statusText.style.color = '#f44336';
+            
+            // Show all buttons
+            if (startButton) startButton.style.display = 'flex';
+            if (stopButton) stopButton.style.display = 'flex';
+            if (restartButton) restartButton.style.display = 'flex';
+          }
+        } catch (error) {
+          const statusIndicator = document.getElementById('redis-status');
+          const statusText = document.getElementById('redis-status-text');
+          const startButton = document.getElementById('redis-start-button');
+          const stopButton = document.getElementById('redis-stop-button');
+          const restartButton = document.getElementById('redis-restart-button');
+          
+          updatePillStatus('redis', 'disconnected');
+          statusText.textContent = 'Disconnected';
+          statusText.style.color = '#f44336';
+          
+          // Show all buttons
+          if (startButton) startButton.style.display = 'flex';
+          if (stopButton) stopButton.style.display = 'flex';
+          if (restartButton) restartButton.style.display = 'flex';
+        }
+      }
+      
+      // Poll immediately and then every 5 seconds
+      updateRelayProxyStatus();
+      setInterval(updateRelayProxyStatus, 5000);
+      
+      pollRedisStatus();
+      setInterval(pollRedisStatus, 5000);
+      
+      pollNodeContainerStatus();
+      setInterval(pollNodeContainerStatus, 5000);
+      
+      pollPhpContainerStatus();
+      setInterval(pollPhpContainerStatus, 5000);
+      
+      // Set up Redis control button handlers
+      const redisStartButton = document.getElementById('redis-start-button');
+      const redisStopButton = document.getElementById('redis-stop-button');
+      const redisRestartButton = document.getElementById('redis-restart-button');
+      
+      if (redisStartButton) {
+        redisStartButton.addEventListener('click', async () => {
+          redisStartButton.disabled = true;
+          const originalText = redisStartButton.textContent;
+          redisStartButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/redis/start', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await pollRedisStatus();
+            } else {
+              alert(`Failed to start Redis: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error starting Redis: ${error.message}`);
+          } finally {
+            redisStartButton.disabled = false;
+            redisStartButton.textContent = originalText;
+          }
+        });
+      }
+      
+      if (redisStopButton) {
+        redisStopButton.addEventListener('click', async () => {
+          redisStopButton.disabled = true;
+          const originalText = redisStopButton.textContent;
+          redisStopButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/redis/stop', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await pollRedisStatus();
+            } else {
+              alert(`Failed to stop Redis: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error stopping Redis: ${error.message}`);
+          } finally {
+            redisStopButton.disabled = false;
+            redisStopButton.textContent = originalText;
+          }
+        });
+      }
+      
+      if (redisRestartButton) {
+        redisRestartButton.addEventListener('click', async () => {
+          redisRestartButton.disabled = true;
+          const originalText = redisRestartButton.textContent;
+          redisRestartButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/redis/restart', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await pollRedisStatus();
+            } else {
+              alert(`Failed to restart Redis: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error restarting Redis: ${error.message}`);
+          } finally {
+            redisRestartButton.disabled = false;
+            redisRestartButton.textContent = originalText;
+          }
+        });
+      }
+      
+      // Set up Relay Proxy control button handlers
+      const relayProxyStartButton = document.getElementById('relay-proxy-start-button');
+      const relayProxyStopButton = document.getElementById('relay-proxy-stop-button');
+      const relayProxyRestartButton = document.getElementById('relay-proxy-restart-button');
+      
+      if (relayProxyStartButton) {
+        relayProxyStartButton.addEventListener('click', async () => {
+          relayProxyStartButton.disabled = true;
+          const originalText = relayProxyStartButton.textContent;
+          relayProxyStartButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/relay-proxy/start', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await updateRelayProxyStatus();
+            } else {
+              alert(`Failed to start Relay Proxy: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error starting Relay Proxy: ${error.message}`);
+          } finally {
+            relayProxyStartButton.disabled = false;
+            relayProxyStartButton.textContent = originalText;
+          }
+        });
+      }
+      
+      if (relayProxyStopButton) {
+        relayProxyStopButton.addEventListener('click', async () => {
+          relayProxyStopButton.disabled = true;
+          const originalText = relayProxyStopButton.textContent;
+          relayProxyStopButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/relay-proxy/stop', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await updateRelayProxyStatus();
+            } else {
+              alert(`Failed to stop Relay Proxy: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error stopping Relay Proxy: ${error.message}`);
+          } finally {
+            relayProxyStopButton.disabled = false;
+            relayProxyStopButton.textContent = originalText;
+          }
+        });
+      }
+      
+      if (relayProxyRestartButton) {
+        relayProxyRestartButton.addEventListener('click', async () => {
+          relayProxyRestartButton.disabled = true;
+          const originalText = relayProxyRestartButton.textContent;
+          relayProxyRestartButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/relay-proxy/restart', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await updateRelayProxyStatus();
+            } else {
+              alert(`Failed to restart Relay Proxy: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error restarting Relay Proxy: ${error.message}`);
+          } finally {
+            relayProxyRestartButton.disabled = false;
+            relayProxyRestartButton.textContent = originalText;
+          }
+        });
+      }
+      
+      // Node.js container status polling
+      async function pollNodeContainerStatus() {
+        try {
+          const response = await fetch('http://localhost:4000/api/node/container-status');
+          const statusIndicator = document.getElementById('node-status');
+          const startButton = document.getElementById('node-start-button');
+          const stopButton = document.getElementById('node-stop-button');
+          const restartButton = document.getElementById('node-restart-button');
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.connected && data.running) {
+              // Node.js container is running
+              updatePillStatus('node', 'connected');
+              
+              // Show stop and restart buttons, hide start
+              if (startButton) startButton.style.display = 'none';
+              if (stopButton) stopButton.style.display = 'flex';
+              if (restartButton) restartButton.style.display = 'flex';
+              // Show action buttons
+              const contextButton = document.getElementById('node-context-button');
+              const testButton = document.getElementById('node-test-evaluation');
+              const viewCacheButton = document.getElementById('node-view-cache');
+              if (contextButton) contextButton.style.display = 'inline-block';
+              if (testButton) testButton.style.display = 'inline-block';
+              if (viewCacheButton) viewCacheButton.style.display = 'inline-block';
+            } else if (data.running === false) {
+              // Node.js container exists but is stopped
+              updatePillStatus('node', 'stopped');
+              
+              // Show start button, hide stop and restart
+              if (startButton) startButton.style.display = 'flex';
+              if (stopButton) stopButton.style.display = 'none';
+              if (restartButton) restartButton.style.display = 'none';
+              
+              // Hide action buttons
+              const contextButton = document.getElementById('node-context-button');
+              const testButton = document.getElementById('node-test-evaluation');
+              const viewCacheButton = document.getElementById('node-view-cache');
+              if (contextButton) contextButton.style.display = 'none';
+              if (testButton) testButton.style.display = 'none';
+              if (viewCacheButton) viewCacheButton.style.display = 'none';
+            } else {
+              // Node.js is not responding
+              updatePillStatus('node', 'disconnected');
+              
+              // Show all buttons
+              if (startButton) startButton.style.display = 'flex';
+              if (stopButton) stopButton.style.display = 'flex';
+              if (restartButton) restartButton.style.display = 'flex';
+              
+              // Hide action buttons
+              const contextButton = document.getElementById('node-context-button');
+              const testButton = document.getElementById('node-test-evaluation');
+              const viewCacheButton = document.getElementById('node-view-cache');
+              if (contextButton) contextButton.style.display = 'none';
+              if (testButton) testButton.style.display = 'none';
+              if (viewCacheButton) viewCacheButton.style.display = 'none';
+            }
+          } else {
+            updatePillStatus('node', 'disconnected');
+            
+            // Show all buttons
+            if (startButton) startButton.style.display = 'flex';
+            if (stopButton) stopButton.style.display = 'flex';
+            if (restartButton) restartButton.style.display = 'flex';
+            
+            // Hide action buttons
+            const contextButton = document.getElementById('node-context-button');
+            const testButton = document.getElementById('node-test-evaluation');
+            const viewCacheButton = document.getElementById('node-view-cache');
+            if (contextButton) contextButton.style.display = 'none';
+            if (testButton) testButton.style.display = 'none';
+            if (viewCacheButton) viewCacheButton.style.display = 'none';
+          }
+        } catch (error) {
+          const statusIndicator = document.getElementById('node-status');
+          const startButton = document.getElementById('node-start-button');
+          const stopButton = document.getElementById('node-stop-button');
+          const restartButton = document.getElementById('node-restart-button');
+          
+          updatePillStatus('node', 'disconnected');
+          
+          // Show all buttons
+          if (startButton) startButton.style.display = 'flex';
+          if (stopButton) stopButton.style.display = 'flex';
+          if (restartButton) restartButton.style.display = 'flex';
+          
+          // Hide action buttons
+          const contextButton = document.getElementById('node-context-button');
+          const testButton = document.getElementById('node-test-evaluation');
+          const viewCacheButton = document.getElementById('node-view-cache');
+          if (contextButton) contextButton.style.display = 'none';
+          if (testButton) testButton.style.display = 'none';
+          if (viewCacheButton) viewCacheButton.style.display = 'none';
+        }
+      }
+      
+      // Set up Node.js control button handlers
+      const nodeStartButton = document.getElementById('node-start-button');
+      const nodeStopButton = document.getElementById('node-stop-button');
+      const nodeRestartButton = document.getElementById('node-restart-button');
+      
+      if (nodeStartButton) {
+        nodeStartButton.addEventListener('click', async () => {
+          nodeStartButton.disabled = true;
+          const originalText = nodeStartButton.textContent;
+          nodeStartButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/node/start', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await pollNodeContainerStatus();
+            } else {
+              alert(`Failed to start Node.js Service: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error starting Node.js Service: ${error.message}`);
+          } finally {
+            nodeStartButton.disabled = false;
+            nodeStartButton.textContent = originalText;
+          }
+        });
+      }
+      
+      if (nodeStopButton) {
+        nodeStopButton.addEventListener('click', async () => {
+          nodeStopButton.disabled = true;
+          const originalText = nodeStopButton.textContent;
+          nodeStopButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/node/stop', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await pollNodeContainerStatus();
+            } else {
+              alert(`Failed to stop Node.js Service: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error stopping Node.js Service: ${error.message}`);
+          } finally {
+            nodeStopButton.disabled = false;
+            nodeStopButton.textContent = originalText;
+          }
+        });
+      }
+      
+      if (nodeRestartButton) {
+        nodeRestartButton.addEventListener('click', async () => {
+          nodeRestartButton.disabled = true;
+          const originalText = nodeRestartButton.textContent;
+          nodeRestartButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/node/restart', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await pollNodeContainerStatus();
+            } else {
+              alert(`Failed to restart Node.js Service: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error restarting Node.js Service: ${error.message}`);
+          } finally {
+            nodeRestartButton.disabled = false;
+            nodeRestartButton.textContent = originalText;
+          }
+        });
+      }
+      
+      // PHP container status polling
+      async function pollPhpContainerStatus() {
+        try {
+          const response = await fetch('http://localhost:4000/api/php/container-status');
+          const statusIndicator = document.getElementById('php-status');
+          const startButton = document.getElementById('php-start-button');
+          const stopButton = document.getElementById('php-stop-button');
+          const restartButton = document.getElementById('php-restart-button');
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.connected && data.running) {
+              // PHP container is running
+              updatePillStatus('php', 'connected');
+              
+              // Show stop and restart buttons, hide start
+              if (startButton) startButton.style.display = 'none';
+              if (stopButton) stopButton.style.display = 'flex';
+              if (restartButton) restartButton.style.display = 'flex';
+              
+              // Show action buttons
+              const contextButton = document.getElementById('php-edit-context');
+              const testButton = document.getElementById('php-test-evaluation');
+              const viewCacheButton = document.getElementById('php-view-cache');
+              if (contextButton) contextButton.style.display = 'inline-block';
+              if (testButton) testButton.style.display = 'inline-block';
+              if (viewCacheButton) viewCacheButton.style.display = 'inline-block';
+            } else if (data.running === false) {
+              // PHP container exists but is stopped
+              updatePillStatus('php', 'stopped');
+              
+              // Show start button, hide stop and restart
+              if (startButton) startButton.style.display = 'flex';
+              if (stopButton) stopButton.style.display = 'none';
+              if (restartButton) restartButton.style.display = 'none';
+              
+              // Hide action buttons
+              const contextButton = document.getElementById('php-edit-context');
+              const testButton = document.getElementById('php-test-evaluation');
+              const viewCacheButton = document.getElementById('php-view-cache');
+              if (contextButton) contextButton.style.display = 'none';
+              if (testButton) testButton.style.display = 'none';
+              if (viewCacheButton) viewCacheButton.style.display = 'none';
+            } else {
+              // PHP is not responding
+              updatePillStatus('php', 'disconnected');
+              
+              // Show all buttons
+              if (startButton) startButton.style.display = 'flex';
+              if (stopButton) stopButton.style.display = 'flex';
+              if (restartButton) restartButton.style.display = 'flex';
+              
+              // Hide action buttons
+              const contextButton = document.getElementById('php-edit-context');
+              const testButton = document.getElementById('php-test-evaluation');
+              const viewCacheButton = document.getElementById('php-view-cache');
+              if (contextButton) contextButton.style.display = 'none';
+              if (testButton) testButton.style.display = 'none';
+              if (viewCacheButton) viewCacheButton.style.display = 'none';
+            }
+          } else {
+            updatePillStatus('php', 'disconnected');
+            
+            // Show all buttons
+            if (startButton) startButton.style.display = 'flex';
+            if (stopButton) stopButton.style.display = 'flex';
+            if (restartButton) restartButton.style.display = 'flex';
+            
+            // Hide action buttons
+            const contextButton = document.getElementById('php-edit-context');
+            const testButton = document.getElementById('php-test-evaluation');
+            const viewCacheButton = document.getElementById('php-view-cache');
+            if (contextButton) contextButton.style.display = 'none';
+            if (testButton) testButton.style.display = 'none';
+            if (viewCacheButton) viewCacheButton.style.display = 'none';
+          }
+        } catch (error) {
+          const statusIndicator = document.getElementById('php-status');
+          const startButton = document.getElementById('php-start-button');
+          const stopButton = document.getElementById('php-stop-button');
+          const restartButton = document.getElementById('php-restart-button');
+          
+          updatePillStatus('php', 'disconnected');
+          
+          // Show all buttons
+          if (startButton) startButton.style.display = 'flex';
+          if (stopButton) stopButton.style.display = 'flex';
+          if (restartButton) restartButton.style.display = 'flex';
+          
+          // Hide action buttons
+          const contextButton = document.getElementById('php-edit-context');
+          const testButton = document.getElementById('php-test-evaluation');
+          const viewCacheButton = document.getElementById('php-view-cache');
+          if (contextButton) contextButton.style.display = 'none';
+          if (testButton) testButton.style.display = 'none';
+          if (viewCacheButton) viewCacheButton.style.display = 'none';
+        }
+      }
+      
+      // Set up PHP control button handlers
+      const phpStartButton = document.getElementById('php-start-button');
+      const phpStopButton = document.getElementById('php-stop-button');
+      const phpRestartButton = document.getElementById('php-restart-button');
+      
+      if (phpStartButton) {
+        phpStartButton.addEventListener('click', async () => {
+          phpStartButton.disabled = true;
+          const originalText = phpStartButton.textContent;
+          phpStartButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/php/start', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await pollPhpContainerStatus();
+            } else {
+              alert(`Failed to start PHP Service: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error starting PHP Service: ${error.message}`);
+          } finally {
+            phpStartButton.disabled = false;
+            phpStartButton.textContent = originalText;
+          }
+        });
+      }
+      
+      if (phpStopButton) {
+        phpStopButton.addEventListener('click', async () => {
+          phpStopButton.disabled = true;
+          const originalText = phpStopButton.textContent;
+          phpStopButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/php/stop', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await pollPhpContainerStatus();
+            } else {
+              alert(`Failed to stop PHP Service: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error stopping PHP Service: ${error.message}`);
+          } finally {
+            phpStopButton.disabled = false;
+            phpStopButton.textContent = originalText;
+          }
+        });
+      }
+      
+      if (phpRestartButton) {
+        phpRestartButton.addEventListener('click', async () => {
+          phpRestartButton.disabled = true;
+          const originalText = phpRestartButton.textContent;
+          phpRestartButton.textContent = '...';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/php/restart', {
+              method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+              
+              // Refresh status immediately
+              await pollPhpContainerStatus();
+            } else {
+              alert(`Failed to restart PHP Service: ${data.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            alert(`Error restarting PHP Service: ${error.message}`);
+          } finally {
+            phpRestartButton.disabled = false;
+            phpRestartButton.textContent = originalText;
+          }
+        });
+      }
+      
+      // Fetch contexts FIRST to establish sessions
+      console.log('[Dashboard] Fetching initial contexts...');
+      await nodePanel.fetchCurrentContext();
+      await phpPanel.fetchCurrentContext();
+      console.log('[Dashboard] Initial contexts fetched');
+      console.log('[Dashboard] Node context:', nodePanel.currentContext);
+      console.log('[Dashboard] PHP context:', phpPanel.currentContext);
+      
+      // Wait a moment for SDKs to fully initialize (3 seconds to be safe)
+      console.log('[Dashboard] Waiting 3 seconds for SDKs to initialize...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      console.log('[Dashboard] SDKs should be initialized');
+      
+      // NOW connect to SSE streams (they will use the established sessions and initialized SDKs)
+      console.log('[Dashboard] Connecting SSE streams...');
+      nodePanel.connectStream();
+      console.log('[Dashboard] Node stream connected');
+      
+      // Add small delay before connecting PHP stream to avoid race conditions
+      setTimeout(() => {
+        phpPanel.connectStream();
+        console.log('[Dashboard] PHP stream connected');
+      }, 100);
+      
+      // Start status polling (but skip initial context fetch since we already did it)
+      nodePanel.startStatusPolling();
+      phpPanel.startStatusPolling();
+      
+      // Create log console instances
+      appDevConsole = new LogConsole('node-app-dev', 'node-app-dev-output', 'polling');
+      phpAppDevConsole = new LogConsole('php-app-dev', 'php-app-dev-output', 'polling');
+      relayProxyConsole = new LogConsole('relay-proxy', 'relay-proxy-output', 'polling');
+      redisMonitorConsole = new LogConsole('redis', 'redis-monitor-output', 'sse');
+      
+      // Start all log consoles
+      appDevConsole.start();
+      phpAppDevConsole.start();
+      relayProxyConsole.start();
+      redisMonitorConsole.start();
+      
+      // Set up clear button handlers
+      const appDevClearBtn = document.getElementById('node-app-dev-clear');
+      if (appDevClearBtn) {
+        appDevClearBtn.addEventListener('click', () => {
+          appDevConsole.clear();
+        });
+      }
+      
+      const phpAppDevClearBtn = document.getElementById('php-app-dev-clear');
+      if (phpAppDevClearBtn) {
+        phpAppDevClearBtn.addEventListener('click', () => {
+          phpAppDevConsole.clear();
+        });
+      }
+      
+      const relayProxyClearBtn = document.getElementById('relay-proxy-clear');
+      if (relayProxyClearBtn) {
+        relayProxyClearBtn.addEventListener('click', () => {
+          relayProxyConsole.clear();
+        });
+      }
+      
+      const redisMonitorClearBtn = document.getElementById('redis-monitor-clear');
+      if (redisMonitorClearBtn) {
+        redisMonitorClearBtn.addEventListener('click', () => {
+          redisMonitorConsole.clear();
+        });
+      }
+      
+      // Set up context button handlers
+      const nodeContextButton = document.getElementById('node-context-button');
+      if (nodeContextButton) {
+        nodeContextButton.addEventListener('click', () => {
+          nodePanel.openContextEditor();
+        });
+      }
+      
+      const phpContextButton = document.getElementById('php-edit-context');
+      if (phpContextButton) {
+        phpContextButton.addEventListener('click', () => {
+          phpPanel.openContextEditor();
+        });
+      }
+      
+      // PHP Test Evaluation button
+      const phpTestButton = document.getElementById('php-test-evaluation');
+      if (phpTestButton) {
+        phpTestButton.addEventListener('click', async () => {
+          phpTestButton.disabled = true;
+          phpTestButton.textContent = 'Testing...';
+          
+          try {
+            // Log the current context before sending
+            console.log('Sending context to PHP test evaluation:', phpPanel.currentContext);
+            
+            // Send the current context from the panel
+            const response = await fetch('http://localhost:4000/api/php/test-evaluation', {
+              method: 'POST',
+              credentials: 'include',  // Include cookies for session
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                context: phpPanel.currentContext
+              })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+              // Update the PHP panel flag display with the evaluated value
+              const phpFlagElement = document.getElementById('php-flag-value');
+              if (phpFlagElement) {
+                phpFlagElement.textContent = data.flagValue;
+              }
+              
+              // Build context details for alert
+              let contextDetails = `- Type: ${data.context.type}\n- Key: ${data.context.key}\n- Anonymous: ${data.context.anonymous}`;
+              if (data.context.email) {
+                contextDetails += `\n- Email: ${data.context.email}`;
+              }
+              if (data.context.name) {
+                contextDetails += `\n- Name: ${data.context.name}`;
+              }
+              if (data.context.location) {
+                contextDetails += `\n- Location: ${data.context.location} ✓`;
+              }
+              
+              alert(`Test Evaluation Complete!\n\nFlag Value: ${data.flagValue}\n\nContext:\n${contextDetails}\n\nCheck the php-app-dev logs for detailed output.`);
+            } else {
+              alert(`Test Evaluation Failed:\n${data.error}`);
+            }
+          } catch (error) {
+            alert(`Error: ${error.message}`);
+          } finally {
+            phpTestButton.disabled = false;
+            phpTestButton.textContent = 'Test Flag Evaluation';
+          }
+        });
+      }
+      
+      // Node.js Test Evaluation button
+      const nodeTestButton = document.getElementById('node-test-evaluation');
+      if (nodeTestButton) {
+        nodeTestButton.addEventListener('click', async () => {
+          nodeTestButton.disabled = true;
+          nodeTestButton.textContent = 'Testing...';
+          
+          try {
+            // Log the current context before sending
+            console.log('Sending context to test evaluation:', nodePanel.currentContext);
+            
+            // Send the current context from the panel
+            const response = await fetch('http://localhost:3000/api/node/test-evaluation', {
+              method: 'POST',
+              credentials: 'include',  // Include cookies for session
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                context: nodePanel.currentContext
+              })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+              // Update the Node.js panel flag display with the evaluated value
+              const nodeFlagElement = document.getElementById('node-flag-value');
+              if (nodeFlagElement) {
+                nodeFlagElement.textContent = data.flagValue;
+              }
+              
+              // Build context details for alert
+              let contextDetails = `- Type: ${data.context.type}\n- Key: ${data.context.key}\n- Anonymous: ${data.context.anonymous}`;
+              if (data.context.email) {
+                contextDetails += `\n- Email: ${data.context.email}`;
+              }
+              if (data.context.name) {
+                contextDetails += `\n- Name: ${data.context.name}`;
+              }
+              if (data.context.location) {
+                contextDetails += `\n- Location: ${data.context.location} ✓`;
+              }
+              
+              alert(`Test Evaluation Complete!\n\nFlag Value: ${data.flagValue}\n\nContext:\n${contextDetails}\n\nCheck the node-app-dev logs for detailed output.`);
+            } else {
+              alert(`Test Evaluation Failed:\n${data.error}`);
+            }
+          } catch (error) {
+            alert(`Error: ${error.message}`);
+          } finally {
+            nodeTestButton.disabled = false;
+            nodeTestButton.textContent = 'Test Flag Evaluation';
+          }
+        });
+      }
+      
+      // Node.js View Cache button
+      const nodeViewCacheButton = document.getElementById('node-view-cache');
+      if (nodeViewCacheButton) {
+        nodeViewCacheButton.addEventListener('click', async () => {
+          await nodePanel.fetchAndDisplayCache();
+        });
+      }
+      
+      // PHP View Cache button
+      const phpViewCacheButton = document.getElementById('php-view-cache');
+      if (phpViewCacheButton) {
+        phpViewCacheButton.addEventListener('click', async () => {
+          await phpPanel.fetchAndDisplayCache();
+        });
+      }
+      
+      // Set up modal interaction handlers
+      const modal = document.getElementById('context-modal');
+      const modalOverlay = modal ? modal.querySelector('.modal-overlay') : null;
+      const modalCancel = document.getElementById('modal-cancel');
+      const modalSave = document.getElementById('modal-save');
+      
+      // Close modal when clicking overlay
+      if (modalOverlay) {
+        modalOverlay.addEventListener('click', () => {
+          modal.classList.remove('show');
+        });
+      }
+      
+      // Close modal when clicking cancel button
+      if (modalCancel) {
+        modalCancel.addEventListener('click', () => {
+          modal.classList.remove('show');
+        });
+      }
+      
+      // Save context when clicking save button
+      if (modalSave) {
+        modalSave.addEventListener('click', async () => {
+          console.log('Save button clicked');
+          
+          // Determine which service panel opened the modal
+          const serviceId = modal.dataset.serviceId;
+          console.log('Service ID from modal:', serviceId);
+          
+          const servicePanel = serviceId === 'node' ? nodePanel : phpPanel;
+          console.log('Service panel:', servicePanel);
+          
+          if (servicePanel && servicePanel.contextModal) {
+            console.log('Calling contextModal.save()');
+            await servicePanel.contextModal.save();
+          } else {
+            console.error('Service panel or contextModal not found', {
+              servicePanel: !!servicePanel,
+              contextModal: servicePanel ? !!servicePanel.contextModal : false
+            });
+          }
+        });
+      }
+      
+      // Close modal on Escape key
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          if (modal.classList.contains('show')) {
+            modal.classList.remove('show');
+          }
+          const relayStatusModal = document.getElementById('relay-status-modal');
+          if (relayStatusModal && relayStatusModal.classList.contains('show')) {
+            relayStatusModal.classList.remove('show');
+          }
+          const loadTestModal = document.getElementById('load-test-modal');
+          if (loadTestModal && loadTestModal.classList.contains('show')) {
+            loadTestModal.classList.remove('show');
+          }
+        }
+      });
+      
+      // Clean up SSE connections when page unloads
+      window.addEventListener('beforeunload', () => {
+        console.log('Page unloading - cleaning up SSE connections');
+        
+        // Stop service panels
+        if (nodePanel) {
+          nodePanel.stopStatusPolling();
+          if (nodePanel.eventSource) {
+            nodePanel.eventSource.close();
+          }
+        }
+        if (phpPanel) {
+          phpPanel.stopStatusPolling();
+          if (phpPanel.eventSource) {
+            phpPanel.eventSource.close();
+          }
+        }
+        
+        // Stop log consoles
+        if (appDevConsole) appDevConsole.stop();
+        if (phpAppDevConsole) phpAppDevConsole.stop();
+        if (relayProxyConsole) relayProxyConsole.stop();
+        if (redisMonitorConsole) redisMonitorConsole.stop();
+      });
+      
+      // Set up relay proxy status modal handlers
+      const relayStatusButton = document.getElementById('relay-status-button');
+      const relayStatusModal = document.getElementById('relay-status-modal');
+      const relayStatusClose = document.getElementById('relay-status-close');
+      const relayStatusOverlay = relayStatusModal ? relayStatusModal.querySelector('.modal-overlay') : null;
+      
+      // Helper function to escape HTML (prevent XSS)
+      function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+      
+      // Helper function to format Unix timestamp
+      function formatTimestamp(unixMs) {
+        if (!unixMs) return 'N/A';
+        const date = new Date(unixMs);
+        return date.toLocaleString();
+      }
+      
+      // Helper function to format time ago
+      function formatTimeAgo(unixMs) {
+        if (!unixMs) return 'N/A';
+        const now = Date.now();
+        const diff = now - unixMs;
+        const seconds = Math.floor(diff / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        const days = Math.floor(hours / 24);
+        
+        if (days > 0) return `${days}d ${hours % 24}h ago`;
+        if (hours > 0) return `${hours}h ${minutes % 60}m ago`;
+        if (minutes > 0) return `${minutes}m ${seconds % 60}s ago`;
+        return `${seconds}s ago`;
+      }
+      
+      if (relayStatusButton) {
+        relayStatusButton.addEventListener('click', async () => {
+          if (relayStatusModal) {
+            relayStatusModal.classList.add('show');
+            
+            // Fetch relay proxy status
+            const statusContent = document.getElementById('relay-status-content');
+            if (statusContent) {
+              statusContent.innerHTML = '<p>Loading status...</p>';
+              
+              try {
+                const response = await fetch('http://localhost:4000/api/relay-status');
+                
+                if (!response.ok) {
+                  throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                // Build comprehensive status display
+                let html = '<div style="font-size: 13px; max-height: 600px; overflow-y: auto;">';
+                
+                // Show Redis warning if unavailable
+                if (data.redisAvailable === false) {
+                  html += '<div style="margin-bottom: 20px; padding: 15px; background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 6px;">';
+                  html += '<h4 style="margin: 0 0 10px 0; font-size: 16px; color: #856404;">⚠️ Redis Unavailable</h4>';
+                  html += '<p style="margin: 0; color: #856404; font-size: 14px;">The Redis data store is not responding. The Relay Proxy is showing cached status information. Data store operations may be degraded or unavailable.</p>';
+                  html += '</div>';
+                }
+                
+                // Overall Status Section
+                html += '<div style="margin-bottom: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 6px;">';
+                html += '<h4 style="margin: 0 0 12px 0; font-size: 16px; color: #333;">Overall Status</h4>';
+                
+                const overallStatus = data.status || 'unknown';
+                const statusColor = overallStatus === 'healthy' ? '#4caf50' : overallStatus === 'degraded' ? '#ff9800' : '#f44336';
+                html += `<div style="margin-bottom: 8px;"><strong>Health:</strong> <span style="color: ${statusColor}; font-weight: 600; text-transform: uppercase;">${escapeHtml(overallStatus)}</span></div>`;
+                
+                if (data.version) {
+                  html += `<div style="margin-bottom: 8px;"><strong>Relay Version:</strong> ${escapeHtml(data.version)}</div>`;
+                }
+                if (data.clientVersion) {
+                  html += `<div style="margin-bottom: 8px;"><strong>SDK Version:</strong> ${escapeHtml(data.clientVersion)}</div>`;
+                }
+                if (data.environments) {
+                  html += `<div><strong>Environments:</strong> ${Object.keys(data.environments).length}</div>`;
+                }
+                html += '</div>';
+                
+                // Per-Environment Details
+                if (data.environments) {
+                  const envNames = Object.keys(data.environments);
+                  
+                  envNames.forEach((envName, index) => {
+                    const env = data.environments[envName];
+                    
+                    html += '<div style="margin-bottom: 20px; padding: 15px; background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 6px;">';
+                    html += `<h4 style="margin: 0 0 12px 0; font-size: 15px; color: #405BFF;">Environment ${index + 1}: ${escapeHtml(envName)}</h4>`;
+                    
+                    // Basic Info
+                    html += '<div style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f0f0f0;">';
+                    if (env.envId) {
+                      html += `<div style="margin-bottom: 6px; font-size: 12px;"><strong>Environment ID:</strong> <code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${escapeHtml(env.envId)}</code></div>`;
+                    }
+                    if (env.sdkKey) {
+                      html += `<div style="margin-bottom: 6px; font-size: 12px;"><strong>SDK Key:</strong> <code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${escapeHtml(env.sdkKey)}</code></div>`;
+                    }
+                    if (env.mobileKey) {
+                      html += `<div style="font-size: 12px;"><strong>Mobile Key:</strong> <code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${escapeHtml(env.mobileKey)}</code></div>`;
+                    }
+                    html += '</div>';
+                    
+                    // Connection Status
+                    if (env.status || env.connectionStatus) {
+                      html += '<div style="margin-bottom: 12px;">';
+                      html += '<div style="font-weight: 600; margin-bottom: 8px; color: #555;">🔌 Connection Status</div>';
+                      
+                      if (env.status) {
+                        const connColor = env.status === 'connected' ? '#4caf50' : '#f44336';
+                        html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>Status:</strong> <span style="color: ${connColor}; font-weight: 600;">${escapeHtml(env.status).toUpperCase()}</span></div>`;
+                      }
+                      
+                      if (env.connectionStatus) {
+                        const cs = env.connectionStatus;
+                        const stateColor = cs.state === 'VALID' ? '#4caf50' : cs.state === 'INTERRUPTED' ? '#ff9800' : cs.state === 'INITIALIZING' ? '#2196f3' : '#f44336';
+                        html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>State:</strong> <span style="color: ${stateColor}; font-weight: 600;">${escapeHtml(cs.state)}</span></div>`;
+                        
+                        if (cs.stateSince) {
+                          html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>State Since:</strong> ${formatTimeAgo(cs.stateSince)} <span style="color: #999; font-size: 11px;">(${formatTimestamp(cs.stateSince)})</span></div>`;
+                        }
+                        
+                        if (cs.lastError) {
+                          html += '<div style="margin: 8px 0 0 12px; padding: 8px; background-color: #fff3cd; border-left: 3px solid #ffc107; border-radius: 3px;">';
+                          html += `<div style="font-weight: 600; color: #856404; margin-bottom: 4px;">⚠️ Last Error</div>`;
+                          if (cs.lastError.kind) {
+                            html += `<div style="font-size: 12px; color: #856404;"><strong>Type:</strong> ${escapeHtml(cs.lastError.kind)}</div>`;
+                          }
+                          if (cs.lastError.time) {
+                            html += `<div style="font-size: 12px; color: #856404;"><strong>Time:</strong> ${formatTimestamp(cs.lastError.time)}</div>`;
+                          }
+                          html += '</div>';
+                        }
+                      }
+                      html += '</div>';
+                    }
+                    
+                    // Data Store Status
+                    if (env.dataStoreStatus) {
+                      const ds = env.dataStoreStatus;
+                      html += '<div style="margin-bottom: 12px;">';
+                      html += '<div style="font-weight: 600; margin-bottom: 8px; color: #555;">💾 Data Store Status</div>';
+                      
+                      const dsStateColor = ds.state === 'VALID' ? '#4caf50' : ds.state === 'INTERRUPTED' ? '#ff9800' : '#f44336';
+                      html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>State:</strong> <span style="color: ${dsStateColor}; font-weight: 600;">${escapeHtml(ds.state)}</span></div>`;
+                      
+                      if (ds.state === 'INTERRUPTED' && ds.error) {
+                        html += '<div style="margin: 8px 0 8px 12px; padding: 8px; background-color: #fff3cd; border-left: 3px solid #ffc107; border-radius: 3px;">';
+                        html += `<div style="font-weight: 600; color: #856404; margin-bottom: 4px;">⚠️ Error</div>`;
+                        html += `<div style="font-size: 12px; color: #856404;">${escapeHtml(ds.error)}</div>`;
+                        html += '</div>';
+                      }
+                      
+                      if (ds.stateSince) {
+                        html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>State Since:</strong> ${formatTimeAgo(ds.stateSince)} <span style="color: #999; font-size: 11px;">(${formatTimestamp(ds.stateSince)})</span></div>`;
+                      }
+                      
+                      if (ds.database) {
+                        html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>Database:</strong> ${escapeHtml(ds.database).toUpperCase()}</div>`;
+                      }
+                      
+                      if (ds.dbServer) {
+                        html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>Server:</strong> <code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${escapeHtml(ds.dbServer)}</code></div>`;
+                      }
+                      
+                      if (ds.dbPrefix) {
+                        html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>Key Prefix:</strong> <code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${escapeHtml(ds.dbPrefix)}</code></div>`;
+                      }
+                      
+                      if (ds.dbTable) {
+                        html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>Table:</strong> <code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${escapeHtml(ds.dbTable)}</code></div>`;
+                      }
+                      
+                      html += '</div>';
+                    }
+                    
+                    // Big Segments Status
+                    if (env.bigSegmentStatus) {
+                      const bs = env.bigSegmentStatus;
+                      html += '<div style="margin-bottom: 12px;">';
+                      html += '<div style="font-weight: 600; margin-bottom: 8px; color: #555;">📊 Big Segments Status</div>';
+                      
+                      if (bs.available !== undefined) {
+                        const availColor = bs.available ? '#4caf50' : '#f44336';
+                        html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>Available:</strong> <span style="color: ${availColor}; font-weight: 600;">${bs.available ? 'YES' : 'NO'}</span></div>`;
+                      }
+                      
+                      if (bs.potentiallyStale !== undefined) {
+                        const staleColor = bs.potentiallyStale ? '#ff9800' : '#4caf50';
+                        html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>Potentially Stale:</strong> <span style="color: ${staleColor}; font-weight: 600;">${bs.potentiallyStale ? 'YES' : 'NO'}</span></div>`;
+                      }
+                      
+                      if (bs.lastSynchronizedOn) {
+                        html += `<div style="margin-bottom: 6px; margin-left: 12px;"><strong>Last Sync:</strong> ${formatTimeAgo(bs.lastSynchronizedOn)} <span style="color: #999; font-size: 11px;">(${formatTimestamp(bs.lastSynchronizedOn)})</span></div>`;
+                      }
+                      
+                      html += '</div>';
+                    }
+                    
+                    html += '</div>';
+                  });
+                }
+                
+                html += '</div>';
+                statusContent.innerHTML = html;
+                
+              } catch (error) {
+                // Disconnected state - show error and troubleshooting
+                let html = '<div style="font-size: 14px;">';
+                html += `<p><strong>Status:</strong> <span style="color: #f44336;">Disconnected</span></p>`;
+                html += `<p><strong>Error:</strong> ${escapeHtml(error.message)}</p>`;
+                
+                html += '<div style="margin-top: 20px; padding: 15px; background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">';
+                html += '<p style="margin: 0 0 10px 0; font-weight: 600; color: #856404;">Troubleshooting Steps:</p>';
+                html += '<ol style="margin: 0; padding-left: 20px; color: #856404;">';
+                html += '<li style="margin-bottom: 8px;">Check if the relay proxy container is running: <code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px;">docker ps | grep relay-proxy</code></li>';
+                html += '<li style="margin-bottom: 8px;">Verify the relay proxy is accessible: <code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px;">curl http://localhost:8030/status</code></li>';
+                html += '<li style="margin-bottom: 8px;">Check relay proxy logs in the dashboard below</li>';
+                html += '<li>Ensure the relay proxy is configured with a valid SDK key</li>';
+                html += '</ol>';
+                html += '</div>';
+                
+                html += '</div>';
+                statusContent.innerHTML = html;
+              }
+            }
+          }
+        });
+      }
+      
+      if (relayStatusClose) {
+        relayStatusClose.addEventListener('click', () => {
+          if (relayStatusModal) {
+            relayStatusModal.classList.remove('show');
+          }
+        });
+      }
+      
+      if (relayStatusOverlay) {
+        relayStatusOverlay.addEventListener('click', () => {
+          if (relayStatusModal) {
+            relayStatusModal.classList.remove('show');
+          }
+        });
+      }
+      
+      // Set up load test modal handlers
+      const loadTestButton = document.getElementById('load-test-button');
+      const loadTestModal = document.getElementById('load-test-modal');
+      const loadTestClose = document.getElementById('load-test-close');
+      const loadTestStart = document.getElementById('load-test-start');
+      const loadTestOverlay = loadTestModal ? loadTestModal.querySelector('.modal-overlay') : null;
+      
+      if (loadTestButton) {
+        loadTestButton.addEventListener('click', () => {
+          if (loadTestModal) {
+            loadTestModal.classList.add('show');
+            // Clear previous output
+            const output = document.getElementById('load-test-output');
+            if (output) {
+              output.style.display = 'none';
+              output.innerHTML = '';
+            }
+          }
+        });
+      }
+      
+      if (loadTestClose) {
+        loadTestClose.addEventListener('click', () => {
+          if (loadTestModal) {
+            loadTestModal.classList.remove('show');
+          }
+        });
+      }
+      
+      if (loadTestOverlay) {
+        loadTestOverlay.addEventListener('click', () => {
+          if (loadTestModal) {
+            loadTestModal.classList.remove('show');
+          }
+        });
+      }
+      
+      if (loadTestStart) {
+        loadTestStart.addEventListener('click', async () => {
+          const requestsInput = document.getElementById('load-test-requests');
+          const concurrencyInput = document.getElementById('load-test-concurrency');
+          const serviceRadio = document.querySelector('input[name="load-test-service"]:checked');
+          const output = document.getElementById('load-test-output');
+          
+          if (!requestsInput || !concurrencyInput || !serviceRadio || !output) {
+            return;
+          }
+          
+          const requests = parseInt(requestsInput.value) || 100;
+          const concurrency = parseInt(concurrencyInput.value) || 10;
+          const service = serviceRadio.value;
+          
+          // Show output area
+          output.style.display = 'block';
+          output.innerHTML = '<p>Starting load test...</p>';
+          
+          try {
+            const response = await fetch('http://localhost:4000/api/load-test', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ requests, concurrency, service })
+            });
+            
+            const data = await response.json();
+            
+            // Display results
+            let html = '<div style="line-height: 1.6;">';
+            html += `<p><strong>Load Test Results</strong></p>`;
+            html += `<p>Total Requests: ${data.totalRequests || requests}</p>`;
+            html += `<p>Successful: ${data.successful || 0}</p>`;
+            html += `<p>Failed: ${data.failed || 0}</p>`;
+            html += `<p>Average Response Time: ${data.avgResponseTime || 'N/A'}ms</p>`;
+            html += `<p>Requests/sec: ${data.requestsPerSecond || 'N/A'}</p>`;
+            html += '</div>';
+            
+            output.innerHTML = html;
+          } catch (error) {
+            output.innerHTML = '<p style="color: #f44336;">Error running load test</p>';
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>

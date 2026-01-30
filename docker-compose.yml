@@ -1,85 +1,244 @@
+# LaunchDarkly Relay Proxy Enterprise Demo - Docker Compose Configuration
+#
+# This configuration defines a 6-container microservices architecture:
+# 1. dashboard - Static web UI (Nginx)
+# 2. api-service - API gateway for status checks and operations
+# 3. app (node-app-dev) - Node.js SDK demonstration
+# 4. relay-proxy - LaunchDarkly Relay Proxy
+# 5. redis - Persistent data store
+# 6. php (php-app-dev) - PHP SDK demonstration
+
 services:
+  # ============================================================================
+  # Dashboard Service
+  # ============================================================================
+  # Purpose: Serves the static web UI for monitoring and demonstration
+  # Port: 8000
+  # Dependencies: None (connects to services via browser/client-side)
+  # Health Check: HTTP GET to root endpoint
+  dashboard:
+    container_name: dashboard
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    ports:
+      - "8000:8000"  # External:Internal - Web UI access
+    networks:
+      - launchdarkly-network
+    # No service dependencies - dashboard is a static site that connects
+    # to api-service, node-app-dev, and php-app-dev via client-side JavaScript.
+    # This allows the dashboard to remain available even if backend services restart.
+    # Health Check: Verifies Nginx is serving content
+    # Runs every 10 seconds, times out after 3 seconds, retries 3 times
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ============================================================================
+  # API Service
+  # ============================================================================
+  # Purpose: Centralized API gateway for status checks and cross-service operations
+  # Port: 4000
+  # Dependencies: relay-proxy, redis
+  # Health Check: HTTP GET to /health endpoint
+  api-service:
+    container_name: api-service
+    build:
+      context: ./api-service
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"  # External:Internal - API endpoints
+    # Environment Variables:
+    # - PORT: HTTP server port (default: 4000)
+    # - RELAY_PROXY_URL: URL for relay proxy status checks
+    # - NODE_APP_URL: URL for Node.js app status checks
+    # - PHP_APP_URL: URL for PHP app status checks
+    environment:
+      - PORT=4000
+      - RELAY_PROXY_URL=http://relay-proxy:8030
+      - NODE_APP_URL=http://node-app-dev:3000
+      - PHP_APP_URL=http://php-app-dev:80
+    # Volume Mounts:
+    # - Docker socket: Required for executing Docker commands (logs, stats)
+    #   Mounted read-write to allow container inspection and log retrieval
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # User: root required to access Docker socket
+    user: root
+    networks:
+      - launchdarkly-network
+    # Service Dependencies:
+    # - relay-proxy: API service checks relay proxy status
+    # - redis: API service checks Redis connectivity
+    depends_on:
+      - relay-proxy
+      - redis
+    # Health Check: Verifies API service is responding
+    # Runs every 10 seconds, times out after 3 seconds, retries 3 times
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ============================================================================
+  # Node.js Application (SDK Demonstration)
+  # ============================================================================
+  # Purpose: Demonstrates LaunchDarkly Node.js SDK in Relay Proxy mode
+  # Port: 3000
+  # Dependencies: relay-proxy
+  # SDK Mode: Relay Proxy (all traffic through relay proxy)
   app:
-    container_name: app-dev
+    container_name: node-app-dev
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "3000:3000"  # External:Internal - SDK demonstration endpoints
+    # Environment Variables:
+    # - PORT: HTTP server port (default: 3000)
+    # - LAUNCHDARKLY_SDK_KEY: LaunchDarkly SDK key (from .env file)
+    # - RELAY_PROXY_URL: URL for SDK to connect to relay proxy
     environment:
       - PORT=3000
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
       - RELAY_PROXY_URL=http://relay-proxy:8030
-      - USE_DAEMON_MODE=${USE_DAEMON_MODE:-false}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PREFIX=${REDIS_PREFIX:-}
+    # Volume Mounts:
+    # - Docker socket: Required for log retrieval operations
+    #   Note: This is legacy from when app served dashboard; may be removed in future
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    # User: root required to access Docker socket
     user: root
     networks:
       - launchdarkly-network
+    # Service Dependencies:
+    # - relay-proxy: Node.js SDK connects to relay proxy for all operations
     depends_on:
       - relay-proxy
 
+  # ============================================================================
+  # LaunchDarkly Relay Proxy
+  # ============================================================================
+  # Purpose: Caches feature flags and forwards events to LaunchDarkly
+  # Port: 8030
+  # Dependencies: redis (with health check)
+  # Health Check: None (relies on Redis health check)
   relay-proxy:
     container_name: relay-proxy
     image: launchdarkly/ld-relay:8.16.4-static-debian12-nonroot-arm64v8
     ports:
-      - "8030:8030"
+      - "8030:8030"  # External:Internal - Relay proxy API
+    # Environment Variables:
+    # - AUTO_CONFIG_KEY: Relay proxy configuration key (from .env file)
+    # - PORT: HTTP server port (default: 8030)
+    # - USE_EVENTS: Enable event forwarding to LaunchDarkly (true)
+    # - USE_REDIS: Enable Redis as persistent data store (1 = enabled)
+    # - REDIS_URL: Connection string for Redis
+    # - ENV_DATASTORE_PREFIX: Prefix for Redis keys (includes environment ID)
+    # - CORS_ALLOW_ORIGIN: CORS configuration for browser access
     environment:
       - AUTO_CONFIG_KEY=${RELAY_PROXY_CONFIG_KEY}
       - PORT=8030
       - USE_EVENTS=true
       - USE_REDIS=1
       - REDIS_URL=redis://redis:6379
-      - ENV_DATASTORE_PREFIX=ld-flags-'$$CID'
+      - ENV_DATASTORE_PREFIX=ld-flags-$$CID
+      - CORS_ALLOW_ORIGIN=http://localhost:3000
     networks:
       - launchdarkly-network
+    # Service Dependencies:
+    # - redis: Relay proxy requires Redis for persistent flag storage
+    #   Waits for Redis to be healthy before starting (condition: service_healthy)
     depends_on:
       redis:
         condition: service_healthy
 
+  # ============================================================================
+  # Redis Data Store
+  # ============================================================================
+  # Purpose: Persistent storage for feature flags and application data
+  # Port: 6379
+  # Dependencies: None
+  # Health Check: Redis PING command
   redis:
     container_name: redis
     image: redis:7-alpine
+    # Command: Enable AOF (Append-Only File) persistence
+    # This ensures data survives container restarts
     command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      - "6379:6379"  # External:Internal - Redis protocol
+    # Volume Mounts:
+    # - redis-data: Persistent volume for Redis data files
+    #   Stores AOF file and RDB snapshots
+    #   Data survives container removal and recreation
     volumes:
       - redis-data:/data
     networks:
       - launchdarkly-network
+    # Health Check: Verifies Redis is accepting connections
+    # Runs every 5 seconds, times out after 3 seconds, retries 5 times
+    # Other services wait for this health check before starting
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
 
+  # ============================================================================
+  # PHP Application (SDK Demonstration)
+  # ============================================================================
+  # Purpose: Demonstrates LaunchDarkly PHP SDK in Daemon mode
+  # Port: 8080 (mapped to internal port 80)
+  # Dependencies: redis (with health check)
+  # SDK Mode: Daemon (reads flags from Redis, sends events via relay proxy)
   php:
     container_name: php-app-dev
     build:
       context: ./php
       dockerfile: Dockerfile
     ports:
-      - "8080:80"
+      - "8080:80"  # External:Internal - PHP application (Nginx on port 80)
+    # Environment Variables:
+    # - LAUNCHDARKLY_SDK_KEY: LaunchDarkly SDK key (from .env file)
+    # - REDIS_HOST: Redis hostname for daemon mode
+    # - REDIS_PORT: Redis port for daemon mode
+    # - REDIS_PREFIX: Redis key prefix (must match relay proxy environment ID)
+    # - RELAY_PROXY_URL: URL for sending analytics events
     environment:
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PREFIX=${REDIS_PREFIX:-}
       - RELAY_PROXY_URL=http://relay-proxy:8030
-      - USE_DAEMON_MODE=${USE_DAEMON_MODE:-false}
     networks:
       - launchdarkly-network
+    # Service Dependencies:
+    # - redis: PHP SDK reads feature flags directly from Redis
+    #   Waits for Redis to be healthy before starting (condition: service_healthy)
     depends_on:
       redis:
         condition: service_healthy
 
+# ==============================================================================
+# Networks
+# ==============================================================================
+# Custom bridge network for inter-container communication
+# All containers communicate over this network using container names as hostnames
 networks:
   launchdarkly-network:
     driver: bridge
 
+# ==============================================================================
+# Volumes
+# ==============================================================================
+# Persistent volumes for data storage
 volumes:
+  # redis-data: Stores Redis AOF and RDB files
+  # Data persists across container restarts and recreations
+  # Located in Docker's volume directory (typically /var/lib/docker/volumes/)
   redis-data:
     driver: local

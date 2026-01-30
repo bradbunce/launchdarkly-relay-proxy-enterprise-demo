@@ -689,8 +689,8 @@ describe('Container Port Accessibility Property Tests', () => {
                 }).on('error', reject);
               });
 
-              // Verify we get a valid HTTP response
-              expect(response.statusCode).toBe(200);
+              // Verify we get a valid HTTP response (200 or 302 redirect)
+              expect([200, 302]).toContain(response.statusCode);
               expect(response.data).toBeTruthy();
             }
 

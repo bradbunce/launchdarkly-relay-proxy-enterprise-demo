@@ -113,3 +113,22 @@ php/vendor/
 php/composer.lock
 /tmp/
 *.tmp
+
+# Test files (keep for local development, exclude from repo)
+*.test.js
+*.pbt.test.js
+*.integration.test.js
+test-*.sh
+test-output.log
+
+# Temporary work/documentation files
+*_FIX.md
+*_FEATURE.md
+*_SUMMARY.md
+*_ENHANCEMENT.md
+*_ISSUE.md
+*_EXPLAINED.md
+*_ARCHITECTURE.md
+*_CONTROL_FEATURE.md
+*_RESILIENCE_AND_FALLBACKS.md
+*_IMPLEMENTATION.md

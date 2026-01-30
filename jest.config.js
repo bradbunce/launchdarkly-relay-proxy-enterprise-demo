@@ -7,5 +7,8 @@ module.exports = {
   ],
   coveragePathIgnorePatterns: [
     '/node_modules/'
-  ]
+  ],
+  testEnvironmentOptions: {
+    customExportConditions: ['node', 'node-addons']
+  }
 };

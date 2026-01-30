@@ -5,6 +5,38 @@ const { loadConfig } = require('./src/config');
 const { initializeLaunchDarkly, closeLaunchDarkly } = require('./src/launchdarkly');
 const { createApp } = require('./src/app');
 
+// Handle unhandled promise rejections to prevent crashes
+process.on('unhandledRejection', (reason, promise) => {
+  // Check if it's a fetch termination error (common when connections are closed)
+  if (reason && reason.message && reason.message.includes('terminated')) {
+    // Silently handle fetch termination errors - these are expected when connections close
+    return;
+  }
+  
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit the process, just log the error
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  // Check if it's a fetch termination error
+  if (error.message && error.message.includes('terminated')) {
+    // Silently handle fetch termination errors
+    return;
+  }
+  
+  console.error('Uncaught Exception:', error);
+  
+  // Only exit for truly fatal errors (port binding, etc.)
+  // Don't exit for SDK-related errors or network issues
+  if (error.code === 'EADDRINUSE' || error.code === 'EACCES') {
+    console.error('Fatal error, exiting...');
+    process.exit(1);
+  } else {
+    console.warn('Non-fatal error caught, continuing operation...');
+  }
+});
+
 // Load and validate configuration
 let config;
 try {

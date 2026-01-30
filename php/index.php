@@ -6,13 +6,707 @@
  * reading feature flags from Redis without connecting to LaunchDarkly servers.
  */
 
+// Suppress display errors but log them for debugging
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
+ini_set('error_log', '/tmp/php-errors.log');
+
 require_once __DIR__ . '/vendor/autoload.php';
 
 use LaunchDarkly\LDClient;
 use LaunchDarkly\Integrations\Redis;
 
+// Store current context for PHP service (dashboard)
+session_start();
+if (!isset($_SESSION['php_service_context'])) {
+    $_SESSION['php_service_context'] = [
+        'type' => 'anonymous',
+        'key' => 'php-anon-' . uniqid(),
+        'anonymous' => true
+    ];
+}
+
+// Log file for streaming to UI
+$logFile = '/tmp/php-app.log';
+
+// Custom logging function
+function log_message($message) {
+    global $logFile;
+    $timestamp = date('Y-m-d H:i:s');
+    $logLine = "[{$timestamp}] {$message}\n";
+    file_put_contents($logFile, $logLine, FILE_APPEND);
+    error_log($message); // Also log to stderr
+}
+
+// ===== INITIALIZE LAUNCHDARKLY SDK CLIENT (ONCE PER WORKER) =====
+// Best practice: Create a single, shared instance of LDClient
+// This client will be reused across all requests in this PHP-FPM worker process
+
+$ldClient = null;
+$ldClientError = null;
+
+function getLDClient() {
+    global $ldClient, $ldClientError;
+    
+    // Return cached client if already initialized
+    if ($ldClient !== null) {
+        return $ldClient;
+    }
+    
+    // Return null if we previously failed to initialize
+    if ($ldClientError !== null) {
+        return null;
+    }
+    
+    try {
+        $sdkKey = getenv('LAUNCHDARKLY_SDK_KEY');
+        $redisHost = getenv('REDIS_HOST') ?: 'redis';
+        $redisPort = getenv('REDIS_PORT') ?: 6379;
+        $redisPrefix = getenv('REDIS_PREFIX') ?: null;
+        $relayProxyUrl = getenv('RELAY_PROXY_URL') ?: 'http://relay-proxy:8030';
+        
+        // Initialize Redis client
+        $redisClient = new Predis\Client([
+            'scheme' => 'tcp',
+            'host' => $redisHost,
+            'port' => (int)$redisPort
+        ]);
+        
+        $options = $redisPrefix ? ['prefix' => $redisPrefix] : [];
+        $featureStore = Redis::featureRequester($redisClient, $options);
+        
+        // Create single LDClient instance (best practice)
+        $ldClient = new LDClient($sdkKey, [
+            'feature_requester' => $featureStore,
+            'send_events' => true,
+            'base_uri' => $relayProxyUrl,
+            'use_ldd' => false
+        ]);
+        
+        log_message('LaunchDarkly SDK client initialized successfully');
+        return $ldClient;
+        
+    } catch (Exception $e) {
+        $ldClientError = $e->getMessage();
+        log_message('Failed to initialize LaunchDarkly SDK: ' . $ldClientError);
+        return null;
+    }
+}
+
+// Helper function to build context from session
+function buildContextFromSession() {
+    $contextData = $_SESSION['php_service_context'];
+    $contextBuilder = \LaunchDarkly\LDContext::builder($contextData['key']);
+    $contextBuilder->kind('user');
+    
+    if (isset($contextData['name'])) {
+        $contextBuilder->name($contextData['name']);
+    }
+    if (isset($contextData['email'])) {
+        $contextBuilder->set('email', $contextData['email']);
+    }
+    if (isset($contextData['location'])) {
+        $contextBuilder->set('location', $contextData['location']);
+    }
+    if (isset($contextData['anonymous'])) {
+        $contextBuilder->set('anonymous', $contextData['anonymous']);
+    }
+    
+    return $contextBuilder->build();
+}
+
+// Initialize the global client once when the script loads
+// This ensures the client is ready for all API endpoints
+getLDClient();
+
+// Handle API endpoints for dashboard
+$requestUri = $_SERVER['REQUEST_URI'];
+$requestMethod = $_SERVER['REQUEST_METHOD'];
+
+// API: Update context
+if ($requestUri === '/api/context' && $requestMethod === 'POST') {
+    header('Content-Type: application/json');
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if ($input['type'] === 'custom') {
+        if (empty($input['email'])) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Email is required for custom context']);
+            exit;
+        }
+        
+        $_SESSION['php_service_context'] = [
+            'type' => 'custom',
+            'key' => $input['email'],
+            'email' => $input['email'],
+            'anonymous' => false
+        ];
+        
+        if (!empty($input['name'])) {
+            $_SESSION['php_service_context']['name'] = $input['name'];
+        }
+        if (!empty($input['location'])) {
+            $_SESSION['php_service_context']['location'] = $input['location'];
+        }
+    } else {
+        $_SESSION['php_service_context'] = [
+            'type' => 'anonymous',
+            'key' => 'php-anon-' . uniqid(),
+            'anonymous' => true
+        ];
+        
+        if (!empty($input['location'])) {
+            $_SESSION['php_service_context']['location'] = $input['location'];
+        }
+    }
+    
+    // Trigger a flag evaluation to store the new context in Redis (daemon mode)
+    try {
+        $client = getLDClient();
+        if ($client) {
+            $context = buildContextFromSession();
+            // Evaluate a flag to ensure the context is stored in Redis
+            $client->variation('user-message', $context, 'Hello from PHP (Fallback - Redis unavailable)');
+            log_message("Context updated and stored in Redis: " . $context->getKey());
+        }
+    } catch (Exception $e) {
+        log_message("Error storing context in Redis: " . $e->getMessage());
+    }
+    
+    echo json_encode(['success' => true, 'context' => $_SESSION['php_service_context']]);
+    exit;
+}
+
+// API: Get current context
+if ($requestUri === '/api/context' && $requestMethod === 'GET') {
+    header('Content-Type: application/json');
+    
+    try {
+        // Ensure session context exists
+        if (!isset($_SESSION['php_service_context'])) {
+            $_SESSION['php_service_context'] = [
+                'type' => 'anonymous',
+                'key' => 'php-anon-' . uniqid(),
+                'anonymous' => true
+            ];
+        }
+        
+        $context = $_SESSION['php_service_context'];
+        
+        echo json_encode([
+            'type' => $context['type'],
+            'key' => $context['key'] ?? 'php-anon-' . uniqid(),
+            'email' => $context['email'] ?? null,
+            'name' => $context['name'] ?? null,
+            'location' => $context['location'] ?? null,
+            'anonymous' => $context['anonymous'] ?? false
+        ]);
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(['error' => $e->getMessage()]);
+        error_log('PHP context endpoint error: ' . $e->getMessage());
+    }
+    exit;
+}
+
+// API: Get status
+if ($requestUri === '/api/status' && $requestMethod === 'GET') {
+    header('Content-Type: application/json');
+    
+    // Use the global client to check status
+    $client = getLDClient();
+    $sdkConnected = ($client !== null);
+    
+    // Also check Redis connectivity
+    $redisConnected = false;
+    $redisError = null;
+    
+    if ($sdkConnected) {
+        try {
+            $redisHost = getenv('REDIS_HOST') ?: 'redis';
+            $redisPort = getenv('REDIS_PORT') ?: 6379;
+            
+            $redisClient = new Predis\Client([
+                'scheme' => 'tcp',
+                'host' => $redisHost,
+                'port' => (int)$redisPort
+            ]);
+            
+            // Test Redis connection with ping
+            $redisClient->ping();
+            $redisConnected = true;
+        } catch (Exception $e) {
+            $redisError = $e->getMessage();
+        }
+    }
+    
+    // Overall connected status requires both SDK and Redis
+    $connected = $sdkConnected && $redisConnected;
+    
+    echo json_encode([
+        'connected' => $connected,
+        'mode' => 'Daemon Mode (Redis + Events)',
+        'sdkVersion' => 'PHP SDK',
+        'sdkInitialized' => $sdkConnected,
+        'redisConnected' => $redisConnected,
+        'error' => !$connected ? ($redisError ?? $ldClientError ?? 'SDK or Redis unavailable') : null
+    ]);
+    exit;
+}
+
+// API: Test flag evaluation (for dashboard testing)
+if ($requestUri === '/api/test-evaluation' && $requestMethod === 'POST') {
+    header('Content-Type: application/json');
+    
+    try {
+        // Use the global client
+        $client = getLDClient();
+        
+        if (!$client) {
+            http_response_code(500);
+            echo json_encode([
+                'success' => false,
+                'error' => $ldClientError ?? 'SDK not initialized'
+            ]);
+            exit;
+        }
+        
+        // Check if context is provided in request body (from dashboard)
+        $input = json_decode(file_get_contents('php://input'), true);
+        
+        if (isset($input['context'])) {
+            // Use context from request body (sent by dashboard)
+            $contextData = $input['context'];
+            
+            // Ensure we have a key - use session key if missing
+            if (empty($contextData['key'])) {
+                if (!empty($contextData['email'])) {
+                    $contextData['key'] = $contextData['email'];
+                } elseif (isset($_SESSION['php_service_context']['key'])) {
+                    // Use the session's key to maintain consistency
+                    $contextData['key'] = $_SESSION['php_service_context']['key'];
+                } else {
+                    $contextData['key'] = 'php-anon-' . uniqid();
+                }
+            }
+            
+            $contextBuilder = \LaunchDarkly\LDContext::builder($contextData['key']);
+            $contextBuilder->kind('user');
+            
+            if (isset($contextData['name'])) {
+                $contextBuilder->name($contextData['name']);
+            }
+            if (isset($contextData['email'])) {
+                $contextBuilder->set('email', $contextData['email']);
+            }
+            if (isset($contextData['location'])) {
+                $contextBuilder->set('location', $contextData['location']);
+            }
+            if (isset($contextData['anonymous'])) {
+                $contextBuilder->set('anonymous', $contextData['anonymous']);
+            }
+            
+            $context = $contextBuilder->build();
+        } else {
+            // Fallback to session context
+            $context = buildContextFromSession();
+            $contextData = $_SESSION['php_service_context'];
+        }
+        
+        // Log context info
+        log_message("=== Test Flag Evaluation ===");
+        log_message("PHP SDK: Context Type: " . ($contextData['type'] ?? 'unknown'));
+        log_message("PHP SDK: Context Key: " . $context->getKey());
+        if (isset($contextData['name'])) {
+            log_message("PHP SDK: Context Name: " . $contextData['name']);
+        }
+        if (isset($contextData['email'])) {
+            log_message("PHP SDK: Context Email: " . $contextData['email']);
+        }
+        if (isset($contextData['location'])) {
+            log_message("PHP SDK: Context Location: " . $contextData['location']);
+        }
+        log_message("PHP SDK: Context Anonymous: " . (($contextData['anonymous'] ?? false) ? 'true' : 'false'));
+        
+        // Evaluate flag
+        log_message("PHP SDK: Evaluating flag 'user-message'");
+        $flagValue = $client->variation('user-message', $context, 'Hello from PHP (Fallback - Redis unavailable)');
+        log_message("PHP SDK: Flag evaluation result: {$flagValue}");
+        log_message("===========================");
+        
+        echo json_encode([
+            'success' => true,
+            'flagValue' => $flagValue,
+            'context' => [
+                'type' => $contextData['type'],
+                'key' => $context->getKey(),
+                'name' => $contextData['name'] ?? null,
+                'email' => $contextData['email'] ?? null,
+                'location' => $contextData['location'] ?? null,
+                'anonymous' => $contextData['anonymous']
+            ]
+        ]);
+    } catch (Exception $e) {
+        log_message("PHP SDK ERROR during test evaluation: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode([
+            'success' => false,
+            'error' => $e->getMessage()
+        ]);
+    }
+    exit;
+}
+
+// API: Get all flags state (SDK cache)
+if ($requestUri === '/api/all-flags' && $requestMethod === 'POST') {
+    header('Content-Type: application/json');
+    
+    try {
+        // Use the global client
+        $client = getLDClient();
+        
+        if (!$client) {
+            http_response_code(500);
+            echo json_encode([
+                'success' => false,
+                'error' => $ldClientError ?? 'SDK not initialized'
+            ]);
+            exit;
+        }
+        
+        // Check if context is provided in request body (from dashboard)
+        $input = json_decode(file_get_contents('php://input'), true);
+        
+        if (isset($input['context'])) {
+            // Use context from request body (sent by dashboard)
+            $contextData = $input['context'];
+            
+            // Ensure we have a key - use session key if missing
+            if (empty($contextData['key'])) {
+                if (!empty($contextData['email'])) {
+                    $contextData['key'] = $contextData['email'];
+                } elseif (isset($_SESSION['php_service_context']['key'])) {
+                    // Use the session's key to maintain consistency
+                    $contextData['key'] = $_SESSION['php_service_context']['key'];
+                } else {
+                    $contextData['key'] = 'php-anon-' . uniqid();
+                }
+            }
+            
+            $contextBuilder = \LaunchDarkly\LDContext::builder($contextData['key']);
+            $contextBuilder->kind('user');
+            
+            if (isset($contextData['name'])) {
+                $contextBuilder->name($contextData['name']);
+            }
+            if (isset($contextData['email'])) {
+                $contextBuilder->set('email', $contextData['email']);
+            }
+            if (isset($contextData['location'])) {
+                $contextBuilder->set('location', $contextData['location']);
+            }
+            if (isset($contextData['anonymous'])) {
+                $contextBuilder->set('anonymous', $contextData['anonymous']);
+            }
+            
+            $context = $contextBuilder->build();
+        } else {
+            // Fallback to session context
+            $context = buildContextFromSession();
+            $contextData = $_SESSION['php_service_context'];
+        }
+        
+        // Get all flags state
+        $allFlagsState = $client->allFlagsState($context);
+        $allFlags = $allFlagsState->toValuesMap();
+        
+        log_message("PHP SDK: All Flags request - Context key: " . $context->getKey());
+        log_message("PHP SDK: All Flags - user-message value: " . ($allFlags['user-message'] ?? 'NOT FOUND'));
+        
+        echo json_encode([
+            'success' => true,
+            'flags' => $allFlags,
+            'valid' => $allFlagsState->isValid(),
+            'context' => [
+                'type' => $contextData['type'],
+                'key' => $context->getKey(),
+                'email' => $contextData['email'] ?? null,
+                'name' => $contextData['name'] ?? null,
+                'location' => $contextData['location'] ?? null,
+                'anonymous' => $contextData['anonymous'] ?? false
+            ]
+        ]);
+    } catch (Exception $e) {
+        log_message("PHP SDK ERROR getting all flags: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode([
+            'success' => false,
+            'error' => $e->getMessage()
+        ]);
+    }
+    exit;
+}
+
+// API: Load test endpoint
+if ($requestUri === '/api/load-test' && $requestMethod === 'POST') {
+    header('Content-Type: application/json');
+    
+    try {
+        $input = json_decode(file_get_contents('php://input'), true);
+        $totalRequests = isset($input['requests']) ? (int)$input['requests'] : 100;
+        $concurrency = isset($input['concurrency']) ? (int)$input['concurrency'] : 10;
+        
+        // Use the global client
+        $client = getLDClient();
+        
+        if (!$client) {
+            http_response_code(500);
+            echo json_encode([
+                'success' => false,
+                'error' => $ldClientError ?? 'SDK not initialized'
+            ]);
+            exit;
+        }
+        
+        log_message("=== Load Test Configuration ===");
+        log_message("Total Requests: {$totalRequests}");
+        log_message("Concurrency: {$concurrency}");
+        log_message("==============================");
+        
+        $stats = [
+            'totalRequests' => 0,
+            'successful' => 0,
+            'failed' => 0,
+            'totalLatency' => 0,
+            'minLatency' => PHP_INT_MAX,
+            'maxLatency' => 0
+        ];
+        
+        $startTime = microtime(true);
+        
+        // Run requests in batches based on concurrency
+        $batches = ceil($totalRequests / $concurrency);
+        
+        for ($batch = 0; $batch < $batches; $batch++) {
+            $batchSize = min($concurrency, $totalRequests - ($batch * $concurrency));
+            
+            for ($i = 0; $i < $batchSize; $i++) {
+                $requestNum = ($batch * $concurrency) + $i;
+                
+                // Create context for this request
+                $contextBuilder = \LaunchDarkly\LDContext::builder("load-test-{$requestNum}@example.com");
+                $contextBuilder->kind('user');
+                $contextBuilder->name("Load Test User {$requestNum}");
+                $context = $contextBuilder->build();
+                
+                $reqStartTime = microtime(true);
+                
+                try {
+                    $flagValue = $client->variation('user-message', $context, 'Hello from PHP (Fallback - Redis unavailable)');
+                    $latency = (microtime(true) - $reqStartTime) * 1000; // Convert to ms
+                    
+                    // Track custom event with response time metric
+                    $client->track('load-test-request', $context, [
+                        'requestNumber' => $requestNum,
+                        'batchNumber' => $batch,
+                        'flagValue' => $flagValue
+                    ], $latency);
+                    
+                    $stats['totalRequests']++;
+                    $stats['successful']++;
+                    $stats['totalLatency'] += $latency;
+                    $stats['minLatency'] = min($stats['minLatency'], $latency);
+                    $stats['maxLatency'] = max($stats['maxLatency'], $latency);
+                } catch (Exception $e) {
+                    $stats['totalRequests']++;
+                    $stats['failed']++;
+                }
+            }
+            
+            // Log progress every 10 batches
+            if (($batch + 1) % 10 === 0) {
+                log_message("Progress: {$stats['totalRequests']}/{$totalRequests} requests completed");
+            }
+        }
+        
+        $totalTime = microtime(true) - $startTime;
+        
+        // Flush events to ensure they're sent to LaunchDarkly
+        log_message("Flushing events to LaunchDarkly...");
+        $client->flush();
+        log_message("Events flushed successfully");
+        
+        // Calculate final stats
+        $avgResponseTime = $stats['successful'] > 0 
+            ? round($stats['totalLatency'] / $stats['successful'], 2)
+            : 0;
+        $requestsPerSecond = $totalTime > 0
+            ? round($stats['successful'] / $totalTime, 2)
+            : 0;
+        
+        log_message("=== Final Results ===");
+        log_message("Total Requests: {$stats['totalRequests']}");
+        log_message("Successful: {$stats['successful']}");
+        log_message("Failed: {$stats['failed']}");
+        log_message("Average Response Time: {$avgResponseTime}ms");
+        log_message("Min Latency: " . ($stats['minLatency'] === PHP_INT_MAX ? 'N/A' : round($stats['minLatency'], 2) . 'ms'));
+        log_message("Max Latency: " . round($stats['maxLatency'], 2) . "ms");
+        log_message("Total Time: " . round($totalTime, 2) . "s");
+        log_message("Requests/sec: {$requestsPerSecond}");
+        log_message("Load test complete!");
+        
+        echo json_encode([
+            'success' => true,
+            'totalRequests' => $stats['totalRequests'],
+            'successful' => $stats['successful'],
+            'failed' => $stats['failed'],
+            'avgResponseTime' => $avgResponseTime,
+            'requestsPerSecond' => $requestsPerSecond
+        ]);
+    } catch (Exception $e) {
+        log_message("PHP SDK ERROR during load test: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode([
+            'success' => false,
+            'error' => $e->getMessage()
+        ]);
+    }
+    exit;
+}
+
+// API: SSE stream for flag updates
+// Parse REQUEST_URI to get just the path without query string
+$requestPath = parse_url($requestUri, PHP_URL_PATH);
+if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
+    // Get context key from query parameter
+    $contextKeyFromUrl = $_GET['contextKey'] ?? null;
+    
+    // Log that we received the request
+    log_message("PHP SDK: SSE endpoint called");
+    log_message("PHP SDK: Context key from URL: " . ($contextKeyFromUrl ?? 'none'));
+    log_message("PHP SDK: Session context key: " . $_SESSION['php_service_context']['key']);
+    
+    // Use context key from URL if provided
+    if ($contextKeyFromUrl && $contextKeyFromUrl !== $_SESSION['php_service_context']['key']) {
+        log_message("PHP SDK: Using context key from URL instead of session");
+        $_SESSION['php_service_context']['key'] = $contextKeyFromUrl;
+    }
+    
+    // Make PHP responsive to client disconnects
+    ignore_user_abort(false);
+    
+    // Check if connection is already aborted
+    if (connection_aborted()) {
+        log_message("PHP SDK: Connection already aborted at start");
+        exit;
+    }
+    
+    header('Content-Type: text/event-stream');
+    header('Cache-Control: no-cache');
+    header('Connection: keep-alive');
+    header('X-Accel-Buffering: no');
+    
+    log_message("PHP SDK: Headers sent");
+    
+    // Disable output buffering completely for SSE
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+    
+    log_message("PHP SDK: Output buffering disabled");
+    
+    // Helper function to send SSE message
+    function sendSSE($message) {
+        echo "data: " . json_encode(['message' => $message]) . "\n\n";
+        if (ob_get_level() > 0) {
+            ob_flush();
+        }
+        flush();
+    }
+    
+    // Send immediate "connecting" message BEFORE any SDK initialization
+    log_message("PHP SDK: Sending connecting message");
+    sendSSE('Connecting to LaunchDarkly...');
+    log_message("PHP SDK: Connecting message sent");
+    
+    try {
+        // NOW initialize the SDK (this may take a few seconds)
+        $startTime = microtime(true);
+        $client = getLDClient();
+        $initTime = microtime(true) - $startTime;
+        
+        if (!$client) {
+            $errorMessage = 'SDK Error: ' . ($ldClientError ?? 'Unable to initialize SDK');
+            sendSSE($errorMessage);
+            exit;
+        }
+        
+        // Log initialization time
+        log_message("PHP SDK: Client initialized in " . round($initTime * 1000, 2) . "ms");
+        
+        // Build context from session using helper function
+        $context = buildContextFromSession();
+        
+        // Wait a moment for Redis to be populated by Relay Proxy (max 2 seconds)
+        // This ensures we don't return fallback on initial load
+        $maxWaitTime = 2; // seconds
+        $waitInterval = 0.1; // 100ms
+        $waited = 0;
+        $message = null;
+        
+        log_message("PHP SDK: Waiting for flag data to be available...");
+        while ($waited < $maxWaitTime) {
+            // Evaluate flag
+            $message = $client->variation('user-message', $context, 'Hello from PHP (Fallback - Redis unavailable)');
+            
+            // If we got a real value (not fallback), break
+            if ($message !== 'Hello from PHP (Fallback - Redis unavailable)') {
+                log_message("PHP SDK: Flag data available after " . round($waited, 2) . "s");
+                log_message("PHP SDK: SSE flag value: " . $message);
+                break;
+            }
+            
+            // Wait a bit and try again
+            usleep($waitInterval * 1000000);
+            $waited += $waitInterval;
+        }
+        
+        if ($message === 'Hello from PHP (Fallback - Redis unavailable)') {
+            log_message("PHP SDK: Still using fallback after " . $maxWaitTime . "s wait");
+        }
+        
+        log_message("PHP SDK: Sending SSE message: " . $message);
+        
+        // Send actual flag value
+        sendSSE($message);
+        
+        // Keep connection alive without polling
+        // In daemon mode, flags are read from Redis. The Relay Proxy updates Redis when flags change.
+        // We don't need to poll - just keep the connection open for the client.
+        // Flag updates will happen when the user changes context or tests evaluation.
+        while (true) {
+            // Just keep connection alive, check every 5 seconds
+            sleep(5);
+            
+            // Check if connection is still alive
+            if (connection_aborted()) {
+                log_message("PHP SDK: SSE connection aborted by client");
+                break;
+            }
+        }
+        
+    } catch (Exception $e) {
+        $errorMessage = 'SDK Error: ' . $e->getMessage();
+        sendSSE($errorMessage);
+    }
+    
+    exit;
+}
+
 // Handle Redis monitor SSE endpoint
-if ($_SERVER['REQUEST_URI'] === '/redis-monitor') {
+if ($requestUri === '/redis-monitor') {
     header('Content-Type: text/event-stream');
     header('Cache-Control: no-cache');
     header('Connection: keep-alive');
@@ -50,26 +744,13 @@ $redisHost = getenv('REDIS_HOST') ?: 'redis';
 $redisPort = getenv('REDIS_PORT') ?: 6379;
 $redisPrefix = getenv('REDIS_PREFIX') ?: null;
 $relayProxyUrl = getenv('RELAY_PROXY_URL') ?: 'http://relay-proxy:8030';
-$useDaemonMode = getenv('USE_DAEMON_MODE') === 'true'; // Control mode via env var
-
-// Log file for streaming to UI
-$logFile = '/tmp/php-app.log';
-
-// Custom logging function
-function log_message($message) {
-    global $logFile;
-    $timestamp = date('Y-m-d H:i:s');
-    $logLine = "[{$timestamp}] {$message}\n";
-    file_put_contents($logFile, $logLine, FILE_APPEND);
-    error_log($message); // Also log to stderr
-}
 
 // Initialize variables for display
-$flagValue = 'Fallback: SDK not initialized';
+$flagValue = 'Hello from PHP (Fallback - SDK not initialized)';
 $errorMessage = null;
 $sdkInitialized = false;
-$sdkMode = 'Unknown';
-$usingFeatureRequester = false;
+$sdkMode = 'Daemon Mode (Redis + Events)';
+$usingFeatureRequester = true;
 
 try {
     // Create Predis client
@@ -84,42 +765,23 @@ try {
     $redisClient->ping();
     log_message("PHP SDK: Redis connection successful");
 
-    // Initialize SDK based on mode
-    if ($useDaemonMode) {
-        // Daemon Mode: Read flags from Redis, send events through relay proxy
-        log_message("PHP SDK: Initializing in Daemon Mode (Redis feature requester + events)");
-        
-        $options = $redisPrefix ? ['prefix' => $redisPrefix] : [];
-        $featureStore = Redis::featureRequester($redisClient, $options);
-        log_message("PHP SDK: Redis feature store configured" . ($redisPrefix ? " with prefix: {$redisPrefix}" : ""));
-        
-        $client = new LDClient($sdkKey, [
-            'feature_requester' => $featureStore,
-            'send_events' => true,           // Enable event sending
-            'base_uri' => $relayProxyUrl,    // Send events through relay proxy
-            'use_ldd' => false,              // Allow event sending
-            'capacity' => 10,
-            'flush_interval' => 1
-        ]);
-        
-        $sdkMode = 'Daemon Mode (Redis + Events)';
-        $usingFeatureRequester = true;
-    } else {
-        // Relay Proxy Mode: Everything through relay proxy
-        log_message("PHP SDK: Initializing in Relay Proxy Mode");
-        
-        $client = new LDClient($sdkKey, [
-            'send_events' => true,
-            'base_uri' => $relayProxyUrl,
-            'capacity' => 10,
-            'flush_interval' => 1
-        ]);
-        
-        $sdkMode = 'Relay Proxy Mode';
-        $usingFeatureRequester = false;
-    }
+    // Initialize SDK in Daemon Mode (Redis + Events)
+    log_message("PHP SDK: Initializing in Daemon Mode (Redis + Events)");
     
-    log_message("PHP SDK: LaunchDarkly client initialized in {$sdkMode}");
+    $options = $redisPrefix ? ['prefix' => $redisPrefix] : [];
+    $featureStore = Redis::featureRequester($redisClient, $options);
+    log_message("PHP SDK: Redis feature store configured" . ($redisPrefix ? " with prefix: {$redisPrefix}" : ""));
+    
+    $client = new LDClient($sdkKey, [
+        'feature_requester' => $featureStore,
+        'send_events' => true,           // Enable event sending
+        'base_uri' => $relayProxyUrl,    // Send events through relay proxy
+        'use_ldd' => false,              // Allow event sending
+        'capacity' => 10,
+        'flush_interval' => 1
+    ]);
+    
+    log_message("PHP SDK: LaunchDarkly client initialized in Daemon Mode (Redis + Events)");
 
     $sdkInitialized = true;
 
@@ -161,7 +823,7 @@ try {
 
     // Evaluate user-message feature flag
     log_message("PHP SDK: Evaluating flag 'user-message'");
-    $flagValue = $client->variation('user-message', $context, 'Fallback: Flag not found');
+    $flagValue = $client->variation('user-message', $context, 'Hello from PHP (Fallback - Redis unavailable)');
     log_message("PHP SDK: Flag evaluation result: {$flagValue}");
     
     // Send a custom track event to test event delivery
@@ -184,7 +846,7 @@ try {
     log_message("PHP SDK ERROR: " . $e->getMessage());
     log_message("PHP SDK ERROR Stack trace: " . $e->getTraceAsString());
     $errorMessage = 'SDK Initialization Error: ' . $e->getMessage();
-    $flagValue = 'Fallback: Error occurred';
+    $flagValue = 'Hello from PHP (Fallback - Error occurred)';
 }
 
 ?>
@@ -491,6 +1153,13 @@ try {
                 redisMonitorEventSource = new EventSource('/redis-monitor');
                 
                 redisMonitorEventSource.onmessage = function(event) {
+                    const message = event.data;
+                    
+                    // Skip PING commands (health checks) - case insensitive
+                    if (message.toLowerCase().includes('"ping"')) {
+                        return;
+                    }
+                    
                     const monitorDiv = document.getElementById('redis-monitor');
                     const logLine = document.createElement('div');
                     logLine.style.marginBottom = '4px';
@@ -504,7 +1173,6 @@ try {
                     timestampSpan.textContent = timestamp;
                     
                     const messageSpan = document.createElement('span');
-                    const message = event.data;
                     
                     // Color code based on Redis command
                     if (message.includes('GET') || message.includes('HGET')) {
@@ -513,8 +1181,6 @@ try {
                         messageSpan.style.color = '#dcdcaa';
                     } else if (message.includes('DEL') || message.includes('EXPIRE')) {
                         messageSpan.style.color = '#f48771';
-                    } else if (message.includes('PING')) {
-                        messageSpan.style.color = '#858585';
                     } else {
                         messageSpan.style.color = '#d4d4d4';
                     }
