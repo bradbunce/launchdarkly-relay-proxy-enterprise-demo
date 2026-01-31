@@ -347,6 +347,68 @@ function createApp() {
       res.json({ showTerminalPanels: true }); // Default to true on error
     }
   });
+  
+  // SSE endpoint for terminal-panels flag real-time updates
+  const terminalPanelsSseClients = new Set();
+  
+  app.get('/api/terminal-panels/stream', (req, res) => {
+    // Set headers for SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    
+    // Add client to set
+    const clientInfo = { res };
+    terminalPanelsSseClients.add(clientInfo);
+    
+    // Send initial value
+    sendTerminalPanelsValue(clientInfo);
+    
+    // Remove client on disconnect
+    req.on('close', () => {
+      terminalPanelsSseClients.delete(clientInfo);
+    });
+  });
+  
+  // Helper function to evaluate and send terminal-panels flag value
+  async function sendTerminalPanelsValue(clientInfo) {
+    const ldClient = getLaunchDarklyClient();
+    
+    let showTerminalPanels = true; // Default
+    
+    if (ldClient) {
+      try {
+        const context = {
+          kind: 'user',
+          key: 'dashboard-user',
+          anonymous: true
+        };
+        
+        showTerminalPanels = await ldClient.variation('terminal-panels', context, true);
+      } catch (error) {
+        console.error('Error evaluating terminal-panels flag:', error);
+      }
+    }
+    
+    clientInfo.res.write(`data: ${JSON.stringify({ showTerminalPanels })}\n\n`);
+  }
+  
+  // Broadcast terminal-panels value to all connected clients
+  async function broadcastTerminalPanelsValue() {
+    console.log(`Broadcasting terminal-panels to ${terminalPanelsSseClients.size} connected clients`);
+    for (const clientInfo of terminalPanelsSseClients) {
+      await sendTerminalPanelsValue(clientInfo);
+    }
+  }
+  
+  // Add terminal-panels broadcast to flag change listener
+  const originalOnFlagChange = onFlagChange;
+  onFlagChange((settings) => {
+    console.log('Flag change callback triggered');
+    broadcastMessage();
+    broadcastNodeServiceMessage();
+    broadcastTerminalPanelsValue(); // Add terminal-panels broadcast
+  });
 
 
 

@@ -3118,11 +3118,12 @@
       await new Promise(resolve => setTimeout(resolve, 3000));
       console.log('[Dashboard] SDKs should be initialized');
       
-      // Evaluate terminal-panels flag to control logs section visibility
-      console.log('[Dashboard] Evaluating terminal-panels flag...');
-      try {
-        const response = await fetch('http://localhost:3000/api/terminal-panels');
-        const data = await response.json();
+      // Connect to terminal-panels SSE stream for real-time updates
+      console.log('[Dashboard] Connecting to terminal-panels SSE stream...');
+      const terminalPanelsEventSource = new EventSource('http://localhost:3000/api/terminal-panels/stream');
+      
+      terminalPanelsEventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
         console.log('[Dashboard] terminal-panels flag value:', data.showTerminalPanels);
         
         const dashboardContainer = document.querySelector('.dashboard-container');
@@ -3137,10 +3138,16 @@
           dashboardContainer.classList.remove('hide-logs');
           logsSection.classList.remove('hidden');
         }
-      } catch (error) {
-        console.error('[Dashboard] Error evaluating terminal-panels flag:', error);
-        // Default to showing panels on error
-      }
+      };
+      
+      terminalPanelsEventSource.onerror = (error) => {
+        console.error('[Dashboard] terminal-panels SSE error:', error);
+        // Keep current state on error
+      };
+      
+      terminalPanelsEventSource.onopen = () => {
+        console.log('[Dashboard] terminal-panels SSE stream connected');
+      };
       
       // NOW connect to SSE streams (they will use the established sessions and initialized SDKs)
       console.log('[Dashboard] Connecting SSE streams...');
