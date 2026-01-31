@@ -322,6 +322,31 @@ function createApp() {
       relayProxyUrl: relayProxyUrl
     });
   });
+  
+  // API endpoint to evaluate terminal-panels flag
+  app.get('/api/terminal-panels', async (req, res) => {
+    const ldClient = getLaunchDarklyClient();
+    
+    if (!ldClient) {
+      // Default to true if SDK not available
+      return res.json({ showTerminalPanels: true });
+    }
+    
+    try {
+      // Use a simple anonymous context for this flag (not user-specific)
+      const context = {
+        kind: 'user',
+        key: 'dashboard-user',
+        anonymous: true
+      };
+      
+      const showTerminalPanels = await ldClient.variation('terminal-panels', context, true);
+      res.json({ showTerminalPanels });
+    } catch (error) {
+      console.error('Error evaluating terminal-panels flag:', error);
+      res.json({ showTerminalPanels: true }); // Default to true on error
+    }
+  });
 
 
 

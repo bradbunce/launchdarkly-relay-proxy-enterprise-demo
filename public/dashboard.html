@@ -25,6 +25,11 @@
       grid-template-columns: 1fr;
       gap: 0;
       overflow: hidden;
+      transition: grid-template-rows 0.3s ease;
+    }
+    
+    .dashboard-container.hide-logs {
+      grid-template-rows: 1fr 0px;
     }
 
     .services-section {
@@ -41,6 +46,11 @@
       gap: 10px;
       padding: 10px;
       background-color: #0a0a0a;
+      transition: opacity 0.3s ease;
+    }
+    
+    .logs-section.hidden {
+      display: none;
     }
 
     .service-panel {
@@ -3107,6 +3117,30 @@
       console.log('[Dashboard] Waiting 3 seconds for SDKs to initialize...');
       await new Promise(resolve => setTimeout(resolve, 3000));
       console.log('[Dashboard] SDKs should be initialized');
+      
+      // Evaluate terminal-panels flag to control logs section visibility
+      console.log('[Dashboard] Evaluating terminal-panels flag...');
+      try {
+        const response = await fetch('http://localhost:3000/api/terminal-panels');
+        const data = await response.json();
+        console.log('[Dashboard] terminal-panels flag value:', data.showTerminalPanels);
+        
+        const dashboardContainer = document.querySelector('.dashboard-container');
+        const logsSection = document.querySelector('.logs-section');
+        
+        if (!data.showTerminalPanels) {
+          console.log('[Dashboard] Hiding terminal panels');
+          dashboardContainer.classList.add('hide-logs');
+          logsSection.classList.add('hidden');
+        } else {
+          console.log('[Dashboard] Showing terminal panels');
+          dashboardContainer.classList.remove('hide-logs');
+          logsSection.classList.remove('hidden');
+        }
+      } catch (error) {
+        console.error('[Dashboard] Error evaluating terminal-panels flag:', error);
+        // Default to showing panels on error
+      }
       
       // NOW connect to SSE streams (they will use the established sessions and initialized SDKs)
       console.log('[Dashboard] Connecting SSE streams...');
