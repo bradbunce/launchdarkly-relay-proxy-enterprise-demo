@@ -336,6 +336,141 @@ app.post('/api/redis/data-store', async (req, res) => {
   }
 });
 
+// Relay Proxy cache endpoint - fetch flags from Relay Proxy's internal cache
+// This creates a temporary SDK client that connects to the Relay Proxy and retrieves
+// the flag data it's serving, demonstrating consistency across all layers
+let relayProxyCacheClient = null;
+let relayProxyCacheData = null;
+
+// Initialize a dedicated SDK client for inspecting Relay Proxy cache
+async function initRelayProxyCacheClient() {
+  if (relayProxyCacheClient) {
+    return relayProxyCacheClient;
+  }
+
+  const LD = require('@launchdarkly/node-server-sdk');
+  const sdkKey = process.env.LAUNCHDARKLY_SDK_KEY;
+  
+  if (!sdkKey) {
+    throw new Error('LAUNCHDARKLY_SDK_KEY not configured');
+  }
+
+  // Create a custom feature store that captures the data
+  class CaptureStore {
+    constructor() {
+      this.data = { flags: {}, segments: {} };
+      this.isInitialized = false;
+    }
+
+    init(allData, cb) {
+      console.log('[Relay Proxy Cache] Received initial data from Relay Proxy');
+      console.log('[Relay Proxy Cache] Data structure:', JSON.stringify(Object.keys(allData || {})));
+      
+      if (allData) {
+        // The SDK passes data with 'features' and 'segments' keys
+        if (allData.features) {
+          this.data.flags = { ...allData.features };
+          console.log('[Relay Proxy Cache] Captured', Object.keys(allData.features).length, 'flags');
+        }
+        if (allData.segments) {
+          this.data.segments = { ...allData.segments };
+          console.log('[Relay Proxy Cache] Captured', Object.keys(allData.segments).length, 'segments');
+        }
+      }
+      
+      this.isInitialized = true;
+      relayProxyCacheData = { ...this.data };
+      
+      if (cb) cb();
+      return Promise.resolve();
+    }
+
+    get(kind, key, cb) {
+      const collection = kind === 'features' ? this.data.flags : this.data.segments;
+      const result = collection[key] || null;
+      if (cb) cb(result);
+      return Promise.resolve(result);
+    }
+
+    all(kind, cb) {
+      const collection = kind === 'features' ? this.data.flags : this.data.segments;
+      if (cb) cb(collection);
+      return Promise.resolve(collection);
+    }
+
+    upsert(kind, item, cb) {
+      console.log(`[Relay Proxy Cache] Update received: ${kind}/${item.key}`);
+      const collection = kind === 'features' ? this.data.flags : this.data.segments;
+      collection[item.key] = item;
+      relayProxyCacheData = { ...this.data };
+      if (cb) cb();
+      return Promise.resolve();
+    }
+
+    initialized(cb) {
+      if (cb) cb(this.isInitialized);
+      return Promise.resolve(this.isInitialized);
+    }
+
+    close() {
+      return Promise.resolve();
+    }
+
+    getDescription() {
+      return 'Relay Proxy Cache Capture Store';
+    }
+  }
+
+  const captureStore = new CaptureStore();
+
+  relayProxyCacheClient = LD.init(sdkKey, {
+    baseUri: 'http://relay-proxy:8030',
+    streamUri: 'http://relay-proxy:8030',
+    eventsUri: 'http://relay-proxy:8030',
+    featureStore: captureStore,
+    stream: true,
+    sendEvents: false,
+    diagnosticOptOut: true
+  });
+
+  await relayProxyCacheClient.waitForInitialization({ timeout: 10 });
+  console.log('[Relay Proxy Cache] SDK client initialized and connected to Relay Proxy');
+  
+  return relayProxyCacheClient;
+}
+
+app.post('/api/relay-proxy/cache', async (req, res) => {
+  try {
+    // Initialize the client if not already done
+    if (!relayProxyCacheClient) {
+      await initRelayProxyCacheClient();
+    }
+
+    // Check if we have cached data
+    if (!relayProxyCacheData || !relayProxyCacheData.flags) {
+      return res.json({
+        success: true,
+        flags: {},
+        message: 'Waiting for Relay Proxy to send data'
+      });
+    }
+
+    // Return the captured flag data
+    res.json({
+      success: true,
+      flags: relayProxyCacheData.flags
+    });
+  } catch (error) {
+    logError('/api/relay-proxy/cache', error, {
+      message: 'Failed to fetch Relay Proxy cache'
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Relay Proxy start endpoint
 app.post('/api/relay-proxy/start', async (req, res) => {
   try {

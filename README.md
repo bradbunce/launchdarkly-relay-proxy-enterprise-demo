@@ -153,12 +153,27 @@ The Redis panel includes a dedicated "Redis Data Store" display that shows the r
 - The same flag data that multiple applications can read from
 - Real-time updates as the Relay Proxy refreshes flag data from LaunchDarkly
 
+**Relay Proxy Panel:**
+The Relay Proxy panel includes a "Relay Proxy Cache" display that shows the internal Go SDK cache maintained by the Relay Proxy. This demonstrates data consistency across all layers:
+- **Layer 1**: LaunchDarkly Cloud (source of truth)
+- **Layer 2**: Relay Proxy's Internal Cache (Go SDK in-memory)
+- **Layer 3**: Redis Persistent Store (shared cache)
+- **Layer 4**: Node.js SDK Cache (receives from Relay Proxy)
+- **Layer 5**: PHP SDK Cache (reads from Redis)
+
+The Relay Proxy cache display shows:
+- Raw flag configurations as served to downstream SDK clients
+- The same data structure that Node.js receives via streaming
+- Real-time updates when flags change in LaunchDarkly
+- Complete flag details including variations, rules, targets, and prerequisites
+
 This feature is useful for:
 - Understanding how flags are structured internally
 - Debugging targeting rules and rollouts
 - Verifying flag configurations are cached correctly
 - Learning how LaunchDarkly stores flag data
 - Monitoring the shared Redis data store used by multiple services
+- Demonstrating data consistency across the entire architecture
 
 ### User Context Management
 

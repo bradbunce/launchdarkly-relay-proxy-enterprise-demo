@@ -60,6 +60,7 @@ services:
       - RELAY_PROXY_URL=http://relay-proxy:8030
       - NODE_APP_URL=http://node-app-dev:3000
       - PHP_APP_URL=http://php-app-dev:80
+      - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
     # Volume Mounts:
     # - Docker socket: Required for executing Docker commands (logs, stats)
     #   Mounted read-write to allow container inspection and log retrieval

@@ -567,6 +567,16 @@
             ⚡ Run Load Test
           </button>
         </div>
+        
+        <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+          <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">Relay Proxy Cache</h4>
+          <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
+            Internal Go SDK cache served to downstream clients
+          </div>
+          <div id="relay-proxy-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+            <div style="color: #999; font-style: italic;">Waiting for Relay Proxy to initialize...</div>
+          </div>
+        </div>
       </div>
 
       <!-- Redis Panel -->
@@ -1748,6 +1758,12 @@
             if (startButton) startButton.style.display = 'none';
             if (stopButton) stopButton.style.display = 'flex';
             if (restartButton) restartButton.style.display = 'flex';
+            
+            // Fetch and display Relay Proxy cache when connected
+            const cacheElement = document.getElementById('relay-proxy-cache');
+            if (cacheElement && (cacheElement.innerHTML.includes('Waiting for Relay Proxy') || cacheElement.innerHTML.includes('Error'))) {
+              fetchRelayProxyCache();
+            }
           }
           
         } catch (error) {
@@ -1930,6 +1946,170 @@
         } catch (error) {
           console.error('Error fetching Redis data store:', error);
           dataStoreElement.innerHTML = `<div style="color: #f44336;">Error: ${error.message}</div>`;
+        }
+      }
+      
+      // Fetch and display Relay Proxy cache
+      async function fetchRelayProxyCache() {
+        const cacheElement = document.getElementById('relay-proxy-cache');
+        
+        if (!cacheElement) {
+          console.error('Relay Proxy cache element not found');
+          return;
+        }
+        
+        // Show loading state
+        cacheElement.innerHTML = '<div style="color: #999; font-style: italic;">Loading...</div>';
+        
+        try {
+          const response = await fetch('http://localhost:4000/api/relay-proxy/cache', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          const data = await response.json();
+          
+          if (!response.ok || !data.success) {
+            const errorMsg = data.error || `HTTP ${response.status}`;
+            cacheElement.innerHTML = `<div style="color: #f44336;">Error: ${errorMsg}</div>`;
+            return;
+          }
+          
+          if (data.flags) {
+            const flags = data.flags;
+            const flagKeys = Object.keys(flags);
+            
+            let html = '';
+            
+            if (flagKeys.length === 0) {
+              html += '<div style="color: #999; font-style: italic;">No flags in Relay Proxy cache</div>';
+            } else {
+              html += '<div style="font-family: monospace;">';
+              flagKeys.forEach(key => {
+                const flagValue = flags[key];
+                
+                const isComplexConfig = flagValue && typeof flagValue === 'object' && flagValue.version !== undefined;
+                
+                html += `<div style="margin-bottom: 12px; padding: 8px; background-color: white; border-radius: 3px; border: 1px solid #e0e0e0;">`;
+                html += `<div style="margin-bottom: 4px;"><strong style="color: #405BFF;">${escapeHtml(key)}</strong></div>`;
+                
+                if (isComplexConfig) {
+                  html += `<div style="font-size: 11px; color: #666; line-height: 1.8;">`;
+                  html += `<div>Version: <span style="color: #333;">${flagValue.version || 'N/A'}</span></div>`;
+                  html += `<div>Enabled: <span style="color: #333;">${flagValue.on ? 'Yes' : 'No'}</span></div>`;
+                  
+                  if (flagValue.variations && flagValue.variations.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Variations (${flagValue.variations.length}):</strong></div>`;
+                    flagValue.variations.forEach((variation, index) => {
+                      const varValue = typeof variation === 'object' ? JSON.stringify(variation) : variation;
+                      html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                      html += `[${index}]: <span style="color: #405BFF; font-weight: 500;">${escapeHtml(varValue)}</span>`;
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  if (flagValue.fallthrough) {
+                    if (flagValue.fallthrough.variation !== undefined) {
+                      html += `<div style="margin-top: 6px;">Default (fallthrough): <span style="color: #333;">variation ${flagValue.fallthrough.variation}</span></div>`;
+                    } else if (flagValue.fallthrough.rollout) {
+                      html += `<div style="margin-top: 6px;"><strong>Default (rollout):</strong></div>`;
+                      const rollout = flagValue.fallthrough.rollout;
+                      if (rollout.variations) {
+                        rollout.variations.forEach((rv) => {
+                          const percentage = (rv.weight / 1000).toFixed(1);
+                          html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                          html += `Variation ${rv.variation}: ${percentage}%`;
+                          html += `</div>`;
+                        });
+                      }
+                    }
+                  }
+                  
+                  if (flagValue.offVariation !== undefined) {
+                    html += `<div>Off variation: <span style="color: #333;">variation ${flagValue.offVariation}</span></div>`;
+                  }
+                  
+                  if (flagValue.rules && flagValue.rules.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Rules (${flagValue.rules.length}):</strong></div>`;
+                    flagValue.rules.forEach((rule, index) => {
+                      html += `<div style="margin-left: 12px; font-size: 10px; margin-bottom: 4px;">`;
+                      html += `<strong>Rule ${index + 1}:</strong>`;
+                      
+                      if (rule.variation !== undefined) {
+                        html += ` → Variation ${rule.variation}`;
+                      } else if (rule.rollout) {
+                        html += ` → Rollout`;
+                      }
+                      
+                      if (rule.clauses && rule.clauses.length > 0) {
+                        html += `<div style="margin-left: 12px; margin-top: 2px;">`;
+                        rule.clauses.forEach((clause) => {
+                          const negateText = clause.negate ? 'NOT ' : '';
+                          const attribute = clause.attribute || 'key';
+                          const op = clause.op || 'unknown';
+                          const values = clause.values || [];
+                          
+                          html += `<div style="color: #666;">`;
+                          html += `${negateText}${attribute} ${op} `;
+                          
+                          if (values.length === 1) {
+                            html += `"${escapeHtml(values[0])}"`;
+                          } else if (values.length > 1) {
+                            html += `[${values.map(v => `"${escapeHtml(v)}"`).join(', ')}]`;
+                          }
+                          
+                          html += `</div>`;
+                        });
+                        html += `</div>`;
+                      }
+                      
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  if (flagValue.targets && flagValue.targets.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Targets (${flagValue.targets.length}):</strong></div>`;
+                    flagValue.targets.forEach((target) => {
+                      const userCount = target.values ? target.values.length : 0;
+                      html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                      html += `Variation ${target.variation}: ${userCount} user(s)`;
+                      if (target.values && target.values.length > 0 && target.values.length <= 5) {
+                        html += ` - ${target.values.map(v => escapeHtml(v)).join(', ')}`;
+                      } else if (target.values && target.values.length > 5) {
+                        html += ` - ${target.values.slice(0, 5).map(v => escapeHtml(v)).join(', ')}, ...`;
+                      }
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  if (flagValue.prerequisites && flagValue.prerequisites.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Prerequisites (${flagValue.prerequisites.length}):</strong></div>`;
+                    flagValue.prerequisites.forEach((prereq) => {
+                      html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                      html += `${escapeHtml(prereq.key)} must be variation ${prereq.variation}`;
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  html += `</div>`;
+                } else {
+                  html += `<div style="font-size: 11px; color: #666; line-height: 1.8;">`;
+                  html += `<div>Value: <span style="color: #333; font-weight: 500;">${escapeHtml(JSON.stringify(flagValue))}</span></div>`;
+                  html += `</div>`;
+                }
+                
+                html += `</div>`;
+              });
+              html += '</div>';
+            }
+            
+            cacheElement.innerHTML = html;
+          } else {
+            cacheElement.innerHTML = '<div style="color: #999; font-style: italic;">No flags found</div>';
+          }
+        } catch (error) {
+          console.error('Error fetching Relay Proxy cache:', error);
+          cacheElement.innerHTML = `<div style="color: #f44336;">Error: ${error.message}</div>`;
         }
       }
       
