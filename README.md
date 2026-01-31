@@ -32,6 +32,11 @@ A comprehensive demonstration application showcasing the LaunchDarkly Node.js se
 - **Docker**: Version 20.10 or higher
 - **Docker Compose**: Version 2.0 or higher
 - **LaunchDarkly Account**: With SDK key and Relay Proxy configuration key
+- **Required Feature Flags**: Two flags must be created in your LaunchDarkly project:
+  - `user-message` (string, multi-variate)
+  - `terminal-panels` (boolean)
+  
+  See the [Required Feature Flags](#required-feature-flags) section below for detailed setup instructions.
 
 ## Quick Start
 
@@ -59,15 +64,32 @@ Optional configuration:
 REDIS_PREFIX=ld-flags-'your-environment-id'
 ```
 
-### 2. Create Feature Flag
+### 2. Create Required Feature Flags
 
-In your LaunchDarkly dashboard:
+This demo requires **two feature flags** to be created in your LaunchDarkly project:
+
+#### Flag 1: user-message (Required)
 1. Create a new flag with key: `user-message`
-2. Set it as a multi-variate string flag
+2. Set it as a **multi-variate string flag**
 3. Add three variations:
    - "Hello from LaunchDarkly!"
    - "Welcome to the demo!"
    - "Greetings from the Relay Proxy!"
+4. Turn the flag **ON** and set a default variation
+
+**Purpose**: Primary demo flag that displays different messages to users. Used to demonstrate flag evaluation, targeting rules, and real-time updates across both Node.js and PHP applications.
+
+#### Flag 2: terminal-panels (Required)
+1. Create a new flag with key: `terminal-panels`
+2. Set it as a **boolean flag**
+3. Two variations:
+   - `true` (show terminal panels)
+   - `false` (hide terminal panels)
+4. Turn the flag **ON** and set default to `true`
+
+**Purpose**: Controls the visibility of terminal log panels in the dashboard UI. When set to `false`, terminal panels are hidden and data store windows expand to use the freed space. Demonstrates real-time UI control via feature flags.
+
+**Important**: Both flags must exist in your LaunchDarkly project for the demo to function correctly. The application will show fallback values if these flags are missing.
 
 ### 3. Run with Docker Compose
 
@@ -1261,29 +1283,69 @@ docker network inspect launchdarkly-network
 docker-compose restart redis php
 ```
 
-## Feature Flag Configuration
+## Required Feature Flags
 
-### Recommended Flag Setup
+This demo application requires **two feature flags** to be created in your LaunchDarkly project. Both flags must exist for the demo to work correctly.
 
-#### Primary Demo Flag: user-message
+### Flag 1: user-message (Required)
 
 **Flag Key**: `user-message`
 **Type**: String (multi-variate)
+**Status**: Must be turned ON
 
 **Variations**:
 1. "Hello from LaunchDarkly!"
 2. "Welcome to the demo!"
 3. "Greetings from the Relay Proxy!"
 
-#### UI Control Flag: terminal-panels
+**Purpose**: 
+This is the primary demo flag that displays different messages to users. It demonstrates:
+- Flag evaluation across both Node.js and PHP applications
+- Multi-variate string flags with multiple variations
+- Real-time flag updates via Server-Sent Events (SSE)
+- Targeting rules and context-based evaluation
+- Consistency between Proxy Mode (Node.js) and Daemon Mode (PHP)
+
+**What Happens Without This Flag**:
+The application will display "Fallback: Flag not found or SDK offline" instead of the actual message.
+
+**Targeting Examples**:
+
+Target by location:
+```
+If user.location contains "San Francisco"
+  Serve variation 2: "Welcome to the demo!"
+```
+
+Target by container:
+```
+If container.key is "app-dev"
+  Serve variation 3: "Greetings from the Relay Proxy!"
+```
+
+Target anonymous users:
+```
+If user.anonymous is true
+  Serve variation 1: "Hello from LaunchDarkly!"
+```
+
+### Flag 2: terminal-panels (Required)
 
 **Flag Key**: `terminal-panels`
 **Type**: Boolean
-**Purpose**: Controls visibility of terminal log panels in the dashboard
+**Status**: Must be turned ON
+**Default Value**: `true` (recommended)
 
 **Variations**:
 - `true`: Show terminal panels (default)
 - `false`: Hide terminal panels and expand data store windows
+
+**Purpose**: 
+Controls the visibility of terminal log panels in the dashboard UI. This flag demonstrates:
+- Real-time UI control via feature flags
+- Dynamic layout adjustments based on flag state
+- Instant updates without browser refresh via SSE
+- Boolean flag evaluation with anonymous context
 
 **Behavior**:
 - **Real-time Updates**: Changes apply instantly without browser refresh via SSE
@@ -1306,25 +1368,29 @@ docker-compose restart redis php
   - Redis Data Store: 517px → 750px
 - All panels maintain scrolling functionality in both states
 
-**Targeting Examples**:
+**What Happens Without This Flag**:
+The terminal panels will always be visible (fallback to `true`), and you won't be able to demonstrate dynamic UI control.
 
-Target by location:
-```
-If user.location contains "San Francisco"
-  Serve variation 2
-```
+### Creating the Flags in LaunchDarkly
 
-Target by container:
-```
-If container.key is "app-dev"
-  Serve variation 3
-```
+1. Log in to https://app.launchdarkly.com
+2. Navigate to your project and environment
+3. Click **"Create flag"**
+4. For `user-message`:
+   - Enter key: `user-message`
+   - Select type: **String**
+   - Click **"Create flag"**
+   - Add the three variations listed above
+   - Turn the flag **ON**
+   - Set a default variation
+5. For `terminal-panels`:
+   - Enter key: `terminal-panels`
+   - Select type: **Boolean**
+   - Click **"Create flag"**
+   - Turn the flag **ON**
+   - Set default to `true`
 
-Target anonymous users:
-```
-If user.anonymous is true
-  Serve variation 1
-```
+**Important**: Both flags must be created in the same LaunchDarkly project and environment that your SDK key and Relay Proxy configuration key are associated with.
 
 ## Best Practices
 
