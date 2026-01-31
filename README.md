@@ -143,11 +143,23 @@ The application uses Server-Sent Events (SSE) to push flag changes instantly:
 
 **SSE Connection Behavior:**
 
-The dashboard maintains persistent SSE connections to both Node.js and PHP services for real-time flag updates. To prevent resource exhaustion and ensure system stability:
+The dashboard maintains persistent SSE connections to both Node.js and PHP services for real-time flag updates:
 
+**Node.js (Relay Proxy Mode):**
+- Receives instant push updates via streaming from Relay Proxy
+- Updates appear immediately when flags change in LaunchDarkly
+- Connection stays open indefinitely
+
+**PHP (Daemon Mode with Polling):**
+- Polls Redis every 5 seconds for flag changes
+- Updates appear within 5 seconds of flag changes in LaunchDarkly
+- Demonstrates how daemon mode can still provide near-real-time updates
+- Connection closes after 5 minutes and automatically reconnects
+
+**Connection Management:**
 - **Connection Timeout**: PHP SSE connections automatically close after 5 minutes
 - **Automatic Reconnection**: The dashboard seamlessly reconnects when a connection closes
-- **Heartbeat Monitoring**: Connections send heartbeats every 15 seconds to detect disconnects
+- **Heartbeat Monitoring**: Connections send heartbeats to detect disconnects
 - **Why This Matters**: Prevents PHP-FPM worker exhaustion and memory leaks from indefinite connections
 
 **What You'll See:**
@@ -597,7 +609,8 @@ docker exec redis redis-cli KEYS "*"
 | Feature | Node.js (Relay Proxy Mode) | PHP (Daemon Mode) |
 |---------|---------------------------|-------------------|
 | Flag Source | Relay Proxy | Redis Direct |
-| Real-time Updates | Yes (streaming) | No |
+| Real-time Updates | Yes (streaming) | Yes (polling every 5s) |
+| Update Mechanism | Push (instant) | Poll (5-second delay) |
 | Analytics Events | Yes | Yes |
 | Network Latency | ~10-50ms | <1ms (Redis read) |
 | LaunchDarkly API Calls | Via Relay Proxy | None (for flags) |

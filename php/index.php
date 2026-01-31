@@ -682,12 +682,15 @@ if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
         // Send actual flag value
         sendSSE($message);
         
-        // Keep connection alive with periodic heartbeats
+        // Keep connection alive and poll for flag changes
         // In daemon mode, flags are read from Redis. The Relay Proxy updates Redis when flags change.
-        // We send periodic heartbeats to detect client disconnects faster.
-        $heartbeatInterval = 15; // seconds between heartbeats
+        // We poll Redis every 5 seconds to detect flag changes and push updates to the client.
+        $pollInterval = 5; // seconds between flag checks
         $maxConnectionTime = 300; // 5 minutes max connection time
         $connectionStart = time();
+        $lastFlagValue = $message; // Track last value to detect changes
+        
+        log_message("PHP SDK: Starting polling loop (checking every {$pollInterval}s for flag changes)");
         
         while (true) {
             // Check if connection is still alive
@@ -703,15 +706,35 @@ if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
                 break;
             }
             
-            // Send heartbeat comment (keeps connection alive, doesn't trigger client event)
-            echo ": heartbeat\n\n";
-            if (ob_get_level() > 0) {
-                ob_flush();
-            }
-            flush();
+            // Sleep before checking for updates
+            sleep($pollInterval);
             
-            // Sleep for heartbeat interval
-            sleep($heartbeatInterval);
+            // Re-evaluate the flag to check for changes
+            try {
+                $currentValue = $client->variation('user-message', $context, 'Hello from PHP (Fallback - Redis unavailable)');
+                
+                // If value changed, send update to client
+                if ($currentValue !== $lastFlagValue) {
+                    log_message("PHP SDK: Flag value changed from '{$lastFlagValue}' to '{$currentValue}'");
+                    sendSSE($currentValue);
+                    $lastFlagValue = $currentValue;
+                } else {
+                    // Send heartbeat comment (keeps connection alive, doesn't trigger client event)
+                    echo ": heartbeat\n\n";
+                    if (ob_get_level() > 0) {
+                        ob_flush();
+                    }
+                    flush();
+                }
+            } catch (Exception $e) {
+                log_message("PHP SDK: Error polling for flag changes: " . $e->getMessage());
+                // Send heartbeat even on error to keep connection alive
+                echo ": heartbeat\n\n";
+                if (ob_get_level() > 0) {
+                    ob_flush();
+                }
+                flush();
+            }
         }
         
     } catch (Exception $e) {
