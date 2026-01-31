@@ -1228,7 +1228,17 @@
       updateFlagValue(value) {
         const flagElement = document.getElementById(`${this.serviceId}-flag-value`);
         if (flagElement) {
+          const previousValue = flagElement.textContent;
           flagElement.textContent = value;
+          
+          // If the flag value changed (and it's not an error message), auto-refresh All Flags
+          if (previousValue !== value && 
+              value !== 'Loading...' && 
+              value !== 'Service unavailable' &&
+              previousValue !== 'Loading...') {
+            console.log(`[${this.serviceId}] Flag value changed, auto-refreshing All Flags`);
+            this.fetchAndDisplayCache();
+          }
         }
       }
       
