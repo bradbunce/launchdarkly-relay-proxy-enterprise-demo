@@ -52,6 +52,23 @@
     .logs-section.hidden {
       display: none;
     }
+    
+    /* Increase data store window heights when terminal panels are hidden */
+    .dashboard-container.hide-logs #node-sdk-cache {
+      max-height: 794px !important; /* 280px + 514px */
+    }
+    
+    .dashboard-container.hide-logs #php-sdk-cache {
+      max-height: 794px !important; /* 280px + 514px */
+    }
+    
+    .dashboard-container.hide-logs #relay-proxy-cache {
+      max-height: 914px !important; /* 400px + 514px */
+    }
+    
+    .dashboard-container.hide-logs #redis-data-store {
+      max-height: 1031px !important; /* 517px + 514px */
+    }
 
     .service-panel {
       background-color: white;
@@ -480,7 +497,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Raw flag configurations cached by the SDK (context-independent)
           </div>
-          <div id="node-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+          <div id="node-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
             <div style="color: #999; font-style: italic;">Waiting for SDK to initialize...</div>
           </div>
         </div>
@@ -534,7 +551,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Raw flag configurations from Redis (context-independent)
           </div>
-          <div id="php-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+          <div id="php-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
             <div style="color: #999; font-style: italic;">Waiting for SDK to initialize...</div>
           </div>
         </div>
@@ -583,7 +600,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Internal Go SDK cache served to downstream clients
           </div>
-          <div id="relay-proxy-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 400px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+          <div id="relay-proxy-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 400px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
             <div style="color: #999; font-style: italic;">Waiting for Relay Proxy to initialize...</div>
           </div>
         </div>
@@ -622,7 +639,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Raw flag configurations stored in Redis (context-independent)
           </div>
-          <div id="redis-data-store" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 517px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+          <div id="redis-data-store" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 517px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
             <div style="color: #999; font-style: italic;">Waiting for Redis to initialize...</div>
           </div>
         </div>
