@@ -390,21 +390,24 @@ async function initRelayProxyCacheClient() {
     }
 
     get(kind, key, cb) {
-      const collection = kind === 'features' ? this.data.flags : this.data.segments;
+      const kindStr = typeof kind === 'object' ? kind.namespace : kind;
+      const collection = kindStr === 'features' ? this.data.flags : this.data.segments;
       const result = collection[key] || null;
       if (cb) cb(result);
       return Promise.resolve(result);
     }
 
     all(kind, cb) {
-      const collection = kind === 'features' ? this.data.flags : this.data.segments;
+      const kindStr = typeof kind === 'object' ? kind.namespace : kind;
+      const collection = kindStr === 'features' ? this.data.flags : this.data.segments;
       if (cb) cb(collection);
       return Promise.resolve(collection);
     }
 
     upsert(kind, item, cb) {
-      console.log(`[Relay Proxy Cache] Update received: ${kind}/${item.key}`);
-      const collection = kind === 'features' ? this.data.flags : this.data.segments;
+      const kindStr = typeof kind === 'object' ? kind.namespace : kind;
+      console.log(`[Relay Proxy Cache] Update received: ${kindStr}/${item.key} (kind type: ${typeof kind}, kind:`, JSON.stringify(kind), ')');
+      const collection = kindStr === 'features' ? this.data.flags : this.data.segments;
       collection[item.key] = item;
       relayProxyCacheData = { ...this.data };
       

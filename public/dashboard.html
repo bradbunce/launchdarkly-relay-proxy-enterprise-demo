@@ -1162,9 +1162,9 @@
       
       // Connect to SSE stream for real-time flag updates
       connectStream() {
-        // Pass context key in URL to ensure same context is used
-        const contextKey = encodeURIComponent(this.currentContext.key);
-        const url = `${this.apiBaseUrl}/message/stream?contextKey=${contextKey}`;
+        // Pass context key in URL so SSE endpoint can look up context from in-memory store
+        const contextKey = this.currentContext?.key || 'unknown';
+        const url = `${this.apiBaseUrl}/message/stream?contextKey=${encodeURIComponent(contextKey)}`;
         console.log(`[${this.serviceId}] Connecting to SSE stream: ${url}`);
         this.eventSource = new EventSource(url);
         
@@ -1237,7 +1237,9 @@
           flagElement.textContent = value;
           
           // If the flag value changed (and it's not an error message), auto-refresh cache
-          if (previousValue !== value && 
+          // BUT: PHP cache is now updated via Relay Proxy SSE, so skip auto-refresh for PHP
+          if (this.serviceId !== 'php' &&
+              previousValue !== value && 
               value !== 'Loading...' && 
               value !== 'Service unavailable' &&
               previousValue !== 'Loading...') {
@@ -1281,7 +1283,10 @@
             this.reconnectStream();
             
             // Automatically refresh the flags cache after context change
-            await this.fetchAndDisplayCache();
+            // BUT: PHP cache is now updated via Relay Proxy SSE, so skip for PHP
+            if (this.serviceId !== 'php') {
+              await this.fetchAndDisplayCache();
+            }
             
             // Show success message with context details
             const contextDetails = [];
@@ -1416,7 +1421,10 @@
         
         if (this.isConnected) {
           // SDK is connected - fetch and display cache
-          if (cacheElement && (cacheElement.innerHTML.includes('SDK must be initialized') || cacheElement.innerHTML.includes('Waiting for SDK'))) {
+          // BUT: PHP cache is now updated via Relay Proxy SSE, so skip for PHP
+          if (this.serviceId !== 'php' && 
+              cacheElement && 
+              (cacheElement.innerHTML.includes('SDK must be initialized') || cacheElement.innerHTML.includes('Waiting for SDK'))) {
             this.fetchAndDisplayCache();
           }
         } else {
@@ -1950,6 +1958,7 @@
       
       // Render Relay Proxy cache display from flag data
       function renderRelayProxyCache(flags) {
+        console.log('[renderRelayProxyCache] Called with', Object.keys(flags).length, 'flags');
         const cacheElement = document.getElementById('relay-proxy-cache');
         
         if (!cacheElement) {
@@ -1959,6 +1968,9 @@
         
         const flagKeys = Object.keys(flags);
         let html = '';
+        
+        // Add timestamp to verify updates
+        html += `<div style="font-size: 10px; color: #999; margin-bottom: 8px;">Last updated: ${new Date().toLocaleTimeString()}</div>`;
         
         if (flagKeys.length === 0) {
           html += '<div style="color: #999; font-style: italic;">No flags in Relay Proxy cache</div>';
@@ -2083,15 +2095,20 @@
         }
         
         cacheElement.innerHTML = html;
+        console.log('[renderRelayProxyCache] Render complete');
       }
       
       // Render Node SDK cache (reuses same logic as Relay Proxy)
       function renderNodeSDKCache(flags) {
+        console.log('[renderNodeSDKCache] Called with', Object.keys(flags).length, 'flags');
         const cacheElement = document.getElementById('node-sdk-cache');
         if (!cacheElement) return;
         
         const flagKeys = Object.keys(flags);
         let html = '';
+        
+        // Add timestamp to verify updates
+        html += `<div style="font-size: 10px; color: #999; margin-bottom: 8px;">Last updated: ${new Date().toLocaleTimeString()}</div>`;
         
         if (flagKeys.length === 0) {
           html += '<div style="color: #999; font-style: italic;">No flags in Node SDK cache</div>';
@@ -2100,15 +2117,25 @@
         }
         
         cacheElement.innerHTML = html;
+        console.log('[renderNodeSDKCache] Render complete');
       }
       
       // Render Redis data store (reuses same logic as Relay Proxy)
       function renderRedisDataStore(flags) {
+        console.log('[renderRedisDataStore] Called with', Object.keys(flags).length, 'flags');
         const dataStoreElement = document.getElementById('redis-data-store');
-        if (!dataStoreElement) return;
+        if (!dataStoreElement) {
+          console.error('[renderRedisDataStore] Element not found!');
+          return;
+        }
+        
+        console.log('[renderRedisDataStore] Element found, current innerHTML length:', dataStoreElement.innerHTML.length);
         
         const flagKeys = Object.keys(flags);
         let html = '';
+        
+        // Add timestamp to verify updates
+        html += `<div style="font-size: 10px; color: #999; margin-bottom: 8px;">Last updated: ${new Date().toLocaleTimeString()}</div>`;
         
         if (flagKeys.length === 0) {
           html += '<div style="color: #999; font-style: italic;">No flags in Redis</div>';
@@ -2116,7 +2143,39 @@
           html += renderFlagList(flags);
         }
         
+        console.log('[renderRedisDataStore] About to set innerHTML, new HTML length:', html.length);
         dataStoreElement.innerHTML = html;
+        console.log('[renderRedisDataStore] innerHTML set, new length:', dataStoreElement.innerHTML.length);
+        console.log('[renderRedisDataStore] Render complete');
+      }
+      
+      // Render PHP SDK cache (reuses same logic as Relay Proxy)
+      function renderPHPSDKCache(flags) {
+        console.log('[renderPHPSDKCache] Called with', Object.keys(flags).length, 'flags');
+        const cacheElement = document.getElementById('php-sdk-cache');
+        if (!cacheElement) {
+          console.error('[renderPHPSDKCache] Element not found!');
+          return;
+        }
+        
+        console.log('[renderPHPSDKCache] Element found, current innerHTML length:', cacheElement.innerHTML.length);
+        
+        const flagKeys = Object.keys(flags);
+        let html = '';
+        
+        // Add timestamp to verify updates
+        html += `<div style="font-size: 10px; color: #999; margin-bottom: 8px;">Last updated: ${new Date().toLocaleTimeString()}</div>`;
+        
+        if (flagKeys.length === 0) {
+          html += '<div style="color: #999; font-style: italic;">No flags in PHP SDK cache</div>';
+        } else {
+          html += renderFlagList(flags);
+        }
+        
+        console.log('[renderPHPSDKCache] About to set innerHTML, new HTML length:', html.length);
+        cacheElement.innerHTML = html;
+        console.log('[renderPHPSDKCache] innerHTML set, new length:', cacheElement.innerHTML.length);
+        console.log('[renderPHPSDKCache] Render complete');
       }
       
       // Shared function to render flag list (DRY principle)
@@ -2281,7 +2340,12 @@
                 renderRelayProxyCache(data.flags);
                 
                 // Also update Redis display since Redis is updated by Relay Proxy
+                console.log('[Relay Proxy Cache] Also updating Redis display');
                 renderRedisDataStore(data.flags);
+                
+                // Also update PHP display since PHP reads from Redis
+                console.log('[Relay Proxy Cache] Also updating PHP SDK cache display');
+                renderPHPSDKCache(data.flags);
               }
             } catch (error) {
               console.error('Error parsing Relay Proxy cache update:', error);
@@ -2385,11 +2449,8 @@
               if (stopButton) stopButton.style.display = 'flex';
               if (restartButton) restartButton.style.display = 'flex';
               
-              // Fetch and display Redis data store when connected
-              const dataStoreElement = document.getElementById('redis-data-store');
-              if (dataStoreElement && (dataStoreElement.innerHTML.includes('Waiting for Redis') || dataStoreElement.innerHTML.includes('Error'))) {
-                fetchRedisDataStore();
-              }
+              // Redis data store is now updated via SSE from Relay Proxy cache
+              // No need to fetch here anymore
             } else if (data.running === false) {
               // Redis container exists but is stopped
               updatePillStatus('redis', 'stopped');

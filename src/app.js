@@ -28,6 +28,11 @@ const sseClients = new Set();
 // Store SSE clients for Node.js service (dashboard)
 const nodeSseClients = new Set();
 
+// In-memory context store to share context between POST endpoint and SSE connections
+// Key: context key (e.g., "node-anon-xxx" or "user@example.com")
+// Value: context object with { type, key, email, name, location, anonymous }
+const nodeContextStore = new Map();
+
 // Generate a single anonymous user key for this session
 const anonymousUserKey = `anon-${crypto.randomUUID()}`;
 
@@ -84,6 +89,10 @@ function createApp() {
         key: `node-anon-${crypto.randomUUID()}`,
         anonymous: true
       };
+      
+      // Also add to in-memory store so SSE connections can access it
+      nodeContextStore.set(req.session.nodeServiceContext.key, { ...req.session.nodeServiceContext });
+      console.log(`[Session Init] Created new anonymous context: ${req.session.nodeServiceContext.key}`);
     }
     next();
   });
@@ -657,9 +666,23 @@ function createApp() {
 
   // ===== Node.js Service Endpoints (Dashboard) =====
   
-  // Helper function to build Node.js service context from session or override
-  function buildNodeServiceContext(req, contextOverride) {
-    const nodeServiceContext = contextOverride || req.session.nodeServiceContext;
+  // Helper function to build Node.js service context from session
+  function buildNodeServiceContext(req) {
+    // Try to get context from in-memory store first (using context key from query param)
+    const contextKey = req.query?.contextKey || req.session.nodeServiceContext?.key;
+    let nodeServiceContext = null;
+    
+    if (contextKey && nodeContextStore.has(contextKey)) {
+      nodeServiceContext = nodeContextStore.get(contextKey);
+      console.log('[buildNodeServiceContext] Using context from in-memory store:', contextKey);
+    } else {
+      // Fall back to session if not in store
+      nodeServiceContext = req.session.nodeServiceContext;
+      console.log('[buildNodeServiceContext] Using context from session');
+    }
+    
+    console.log('[buildNodeServiceContext] Context data:', JSON.stringify(nodeServiceContext, null, 2));
+    
     const userContext = {
       key: nodeServiceContext.key,
       anonymous: nodeServiceContext.anonymous || false
@@ -667,21 +690,31 @@ function createApp() {
     
     if (nodeServiceContext.name) {
       userContext.name = nodeServiceContext.name;
+      console.log('[buildNodeServiceContext] Added name:', nodeServiceContext.name);
     }
     if (nodeServiceContext.email) {
       userContext.email = nodeServiceContext.email;
+      console.log('[buildNodeServiceContext] Added email:', nodeServiceContext.email);
     }
     if (nodeServiceContext.location) {
       userContext.location = nodeServiceContext.location;
+      console.log('[buildNodeServiceContext] Added location:', nodeServiceContext.location);
+    } else {
+      console.log('[buildNodeServiceContext] NO LOCATION in context!');
     }
     
-    return {
+    const context = {
       kind: 'multi',
       user: userContext,
       container: {
+        kind: 'container',
         key: 'node-service'
       }
     };
+    
+    console.log('[buildNodeServiceContext] Final context:', JSON.stringify(context, null, 2));
+    
+    return context;
   }
 
   // SSE endpoint for Node.js service real-time flag updates
@@ -693,13 +726,10 @@ function createApp() {
     console.log('=== SSE Connection ===');
     console.log('Context Key from URL:', contextKey);
     console.log('Session ID:', req.sessionID);
-    console.log('Session Context Key:', req.session.nodeServiceContext.key);
-    
-    // Use context key from URL if provided, otherwise fall back to session
-    let contextToUse = req.session.nodeServiceContext;
-    if (contextKey && contextKey !== req.session.nodeServiceContext.key) {
-      console.log('Using context key from URL instead of session');
-      contextToUse = { ...req.session.nodeServiceContext, key: contextKey };
+    console.log('Session Context Key:', req.session.nodeServiceContext?.key);
+    console.log('In-memory store has context:', nodeContextStore.has(contextKey));
+    if (nodeContextStore.has(contextKey)) {
+      console.log('In-memory context:', JSON.stringify(nodeContextStore.get(contextKey), null, 2));
     }
     console.log('======================');
     
@@ -708,8 +738,8 @@ function createApp() {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     
-    // Add client to set with context reference
-    const clientInfo = { res, req, serviceId: 'node', contextOverride: contextToUse };
+    // Add client to set - context will be read from in-memory store using contextKey
+    const clientInfo = { res, req, serviceId: 'node' };
     nodeSseClients.add(clientInfo);
     
     // Send initial message
@@ -752,11 +782,11 @@ function createApp() {
       
       const initError = getInitializationError();
       if (initError) {
-        const context = buildNodeServiceContext(clientInfo.req, clientInfo.contextOverride);
+        const context = buildNodeServiceContext(clientInfo.req);
         const fallbackValue = await ldClient.variation('user-message', context, 'Fallback: Flag not found or SDK offline');
         message = 'SDK Error: ' + initError + '\n\nUsing fallback variation: "' + fallbackValue + '"';
       } else {
-        const context = buildNodeServiceContext(clientInfo.req, clientInfo.contextOverride);
+        const context = buildNodeServiceContext(clientInfo.req);
         
         // Wait for SDK to have valid flag data (max 5 seconds)
         const maxWaitTime = 5000; // 5 seconds
@@ -841,9 +871,14 @@ function createApp() {
         }
       } else {
         // Anonymous context
+        // Only generate new key if switching from custom to anonymous or if no context exists
+        const needsNewKey = !req.session.nodeServiceContext || 
+                           req.session.nodeServiceContext.type === 'custom' ||
+                           !req.session.nodeServiceContext.key.startsWith('node-anon-');
+        
         req.session.nodeServiceContext = {
           type: 'anonymous',
-          key: `node-anon-${crypto.randomUUID()}`,
+          key: needsNewKey ? `node-anon-${crypto.randomUUID()}` : req.session.nodeServiceContext.key,
           anonymous: true
         };
         
@@ -856,6 +891,12 @@ function createApp() {
       if (req.session.nodeServiceContext.location) {
         console.log(`  Location: ${req.session.nodeServiceContext.location}`);
       }
+      
+      // Store context in in-memory store so SSE connections can access it
+      const contextKey = req.session.nodeServiceContext.key;
+      nodeContextStore.set(contextKey, { ...req.session.nodeServiceContext });
+      console.log(`[Context Store] Saved context for key: ${contextKey}`);
+      console.log(`[Context Store] Context data:`, JSON.stringify(nodeContextStore.get(contextKey), null, 2));
       
       // Save session explicitly to ensure it's persisted
       req.session.save((err) => {
