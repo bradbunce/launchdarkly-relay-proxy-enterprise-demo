@@ -447,7 +447,7 @@
         </div>
         
         <div class="sdk-config">
-          <strong>Mode:</strong> <span id="node-sdk-mode">Relay Proxy Mode</span>
+          <strong>SDK Client Mode:</strong> <span id="node-sdk-mode">Proxy Mode</span>
         </div>
         
         <div class="context-display">
@@ -466,14 +466,13 @@
         </div>
         
         <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
-          <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">All Flags (SDK Cache)</h4>
+          <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">SDK Data Store</h4>
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
-            <strong>Context:</strong> <span id="node-cache-context-display">Loading...</span>
+            Raw flag configurations cached by the SDK (context-independent)
           </div>
-          <div id="node-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 150px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
-            <div style="color: #999; font-style: italic;">Click "View Flags" to load</div>
+          <div id="node-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+            <div style="color: #999; font-style: italic;">Waiting for SDK to initialize...</div>
           </div>
-          <button id="node-view-cache" class="btn-secondary" style="margin-top: 10px; padding: 8px 16px; font-size: 13px;">View Flags</button>
         </div>
       </div>
 
@@ -502,7 +501,7 @@
         </div>
         
         <div class="sdk-config">
-          <strong>Mode:</strong> <span id="php-sdk-mode">Daemon Mode (Redis + Events)</span>
+          <strong>SDK Client Mode:</strong> <span id="php-sdk-mode">Daemon Mode</span>
         </div>
         
         <div class="context-display">
@@ -521,14 +520,13 @@
         </div>
         
         <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
-          <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">All Flags (Redis Store)</h4>
+          <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">Redis Data Store</h4>
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
-            <strong>Context:</strong> <span id="php-cache-context-display">Loading...</span>
+            Raw flag configurations from Redis (context-independent)
           </div>
-          <div id="php-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 150px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
-            <div style="color: #999; font-style: italic;">Click "View Flags" to load</div>
+          <div id="php-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+            <div style="color: #999; font-style: italic;">Waiting for SDK to initialize...</div>
           </div>
-          <button id="php-view-cache" class="btn-secondary" style="margin-top: 10px; padding: 8px 16px; font-size: 13px;">View Flags</button>
         </div>
       </div>
 
@@ -1148,6 +1146,13 @@
         this.serviceId = serviceId; // 'node' or 'php'
         this.apiBaseUrl = apiBaseUrl;
         this.eventSource = null;
+        
+        // Configure cache endpoint per service
+        // Node uses 'sdk-cache' (raw data store), PHP uses 'redis-cache' (Redis data store)
+        this.cacheEndpoint = serviceId === 'node' ? 'sdk-cache' : 'redis-cache';
+        
+        // Track SDK connection status
+        this.isConnected = false;
         this.currentContext = { type: 'anonymous' };
         this.reconnectAttempts = 0;
         this.reconnectTimeout = null;
@@ -1231,12 +1236,12 @@
           const previousValue = flagElement.textContent;
           flagElement.textContent = value;
           
-          // If the flag value changed (and it's not an error message), auto-refresh All Flags
+          // If the flag value changed (and it's not an error message), auto-refresh cache
           if (previousValue !== value && 
               value !== 'Loading...' && 
               value !== 'Service unavailable' &&
               previousValue !== 'Loading...') {
-            console.log(`[${this.serviceId}] Flag value changed, auto-refreshing All Flags`);
+            console.log(`[${this.serviceId}] Flag value changed, auto-refreshing cache`);
             this.fetchAndDisplayCache();
           }
         }
@@ -1383,6 +1388,12 @@
           // Update status indicator based on health
           this.updateStatusIndicator(data.connected);
           
+          // Track connection status
+          this.isConnected = data.connected;
+          
+          // Update cache button state based on connection
+          this.updateCacheButtonState();
+          
           // Update SDK mode display
           const sdkModeElement = document.getElementById(`${this.serviceId}-sdk-mode`);
           if (sdkModeElement && data.mode) {
@@ -1392,6 +1403,27 @@
         } catch (error) {
           console.error(`Error polling status for ${this.serviceId}:`, error);
           this.updateStatusIndicator(false);
+          this.isConnected = false;
+          this.updateCacheButtonState();
+        }
+      }
+      
+      // Update cache display state based on SDK connection
+      updateCacheButtonState() {
+        const cacheElement = document.getElementById(`${this.serviceId}-sdk-cache`);
+        
+        if (!cacheElement) return;
+        
+        if (this.isConnected) {
+          // SDK is connected - fetch and display cache
+          if (cacheElement && (cacheElement.innerHTML.includes('SDK must be initialized') || cacheElement.innerHTML.includes('Waiting for SDK'))) {
+            this.fetchAndDisplayCache();
+          }
+        } else {
+          // SDK not connected - show message
+          if (cacheElement && !cacheElement.innerHTML.includes('Waiting for SDK')) {
+            cacheElement.innerHTML = '<div style="color: #999; font-style: italic;">SDK must be initialized to view cache</div>';
+          }
         }
       }
       
@@ -1457,71 +1489,177 @@
         }
       }
       
-      // Fetch and display SDK cache (all flags)
+      // Fetch and display SDK cache (data store)
       async fetchAndDisplayCache() {
-        const cacheButton = document.getElementById(`${this.serviceId}-view-cache`);
         const cacheElement = document.getElementById(`${this.serviceId}-sdk-cache`);
-        const contextDisplayElement = document.getElementById(`${this.serviceId}-cache-context-display`);
         
         if (!cacheElement) {
           console.error(`Cache element not found for ${this.serviceId}`);
           return;
         }
         
-        // Update context display
-        if (contextDisplayElement && this.currentContext) {
-          const contextType = this.currentContext.type === 'anonymous' ? 'Anonymous' : 'Custom';
-          const contextKey = this.currentContext.key || 'Unknown';
-          contextDisplayElement.innerHTML = `${contextType} (<code style="font-size: 11px; background: #f0f0f0; padding: 2px 4px; border-radius: 2px;">${this.escapeHtml(contextKey)}</code>)`;
+        // Check if SDK is connected before attempting to fetch
+        if (!this.isConnected) {
+          cacheElement.innerHTML = '<div style="color: #f44336;">Error: SDK not initialized. Please wait for SDK to connect.</div>';
+          return;
         }
         
-        // Disable button and show loading state
-        if (cacheButton) {
-          cacheButton.disabled = true;
-          cacheButton.textContent = 'Loading...';
-        }
+        // Show loading state
+        cacheElement.innerHTML = '<div style="color: #999; font-style: italic;">Loading...</div>';
         
         try {
-          // Send current context in request body to ensure consistency with test evaluation
-          const response = await fetch(`${this.apiBaseUrl}/all-flags`, {
+          // No context needed - data store is context-independent
+          const response = await fetch(`${this.apiBaseUrl}/${this.cacheEndpoint}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({
-              context: this.currentContext
-            })
+            body: JSON.stringify({})
           });
-          
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
           
           const data = await response.json();
           
-          if (data.success && data.flags) {
+          if (!response.ok || !data.success) {
+            // Show the actual error message from the server
+            const errorMsg = data.error || `HTTP ${response.status}`;
+            cacheElement.innerHTML = `<div style="color: #f44336;">Error: ${errorMsg}</div>`;
+            return;
+          }
+          
+          if (data.flags) {
             const flags = data.flags;
             const flagKeys = Object.keys(flags);
             
             let html = '';
             
-            // Show context info if available
-            if (data.context) {
-              html += '<div style="margin-bottom: 10px; padding: 8px; background-color: #f0f2ff; border-radius: 3px; font-size: 11px;">';
-              html += `<strong>Context:</strong> ${data.context.type === 'anonymous' ? 'Anonymous' : 'Custom'} `;
-              html += `<span style="font-family: monospace;">(${this.escapeHtml(data.context.key)})</span>`;
-              html += '</div>';
-            }
-            
             if (flagKeys.length === 0) {
-              html += '<div style="color: #999; font-style: italic;">No flags in cache</div>';
+              html += '<div style="color: #999; font-style: italic;">No flags in data store</div>';
             } else {
               html += '<div style="font-family: monospace;">';
               flagKeys.forEach(key => {
-                const value = flags[key];
-                const valueStr = typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
-                html += `<div style="margin-bottom: 8px; padding: 6px; background-color: white; border-radius: 3px; border: 1px solid #e0e0e0;">`;
-                html += `<strong style="color: #405BFF;">${this.escapeHtml(key)}:</strong> `;
-                html += `<span style="color: #333;">${this.escapeHtml(valueStr)}</span>`;
+                const flagValue = flags[key];
+                
+                console.log('[Dashboard] Processing flag:', key, 'has variations:', !!flagValue.variations, 'length:', flagValue.variations?.length);
+                
+                // Check if this is a complex configuration object or a simple value
+                const isComplexConfig = flagValue && typeof flagValue === 'object' && flagValue.version !== undefined;
+                
+                html += `<div style="margin-bottom: 12px; padding: 8px; background-color: white; border-radius: 3px; border: 1px solid #e0e0e0;">`;
+                html += `<div style="margin-bottom: 4px;"><strong style="color: #405BFF;">${this.escapeHtml(key)}</strong></div>`;
+                
+                if (isComplexConfig) {
+                  // Display raw flag configuration structure
+                  html += `<div style="font-size: 11px; color: #666; line-height: 1.8;">`;
+                  html += `<div>Version: <span style="color: #333;">${flagValue.version || 'N/A'}</span></div>`;
+                  html += `<div>Enabled: <span style="color: #333;">${flagValue.on ? 'Yes' : 'No'}</span></div>`;
+                  
+                  if (flagValue.variations && flagValue.variations.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Variations (${flagValue.variations.length}):</strong></div>`;
+                    flagValue.variations.forEach((variation, index) => {
+                      const varValue = typeof variation === 'object' ? JSON.stringify(variation) : variation;
+                      html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                      html += `[${index}]: <span style="color: #405BFF; font-weight: 500;">${this.escapeHtml(varValue)}</span>`;
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  if (flagValue.fallthrough) {
+                    if (flagValue.fallthrough.variation !== undefined) {
+                      // Simple fallthrough
+                      html += `<div style="margin-top: 6px;">Default (fallthrough): <span style="color: #333;">variation ${flagValue.fallthrough.variation}</span></div>`;
+                    } else if (flagValue.fallthrough.rollout) {
+                      // Percentage rollout
+                      html += `<div style="margin-top: 6px;"><strong>Default (rollout):</strong></div>`;
+                      const rollout = flagValue.fallthrough.rollout;
+                      if (rollout.variations) {
+                        rollout.variations.forEach((rv) => {
+                          const percentage = (rv.weight / 1000).toFixed(1);
+                          html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                          html += `Variation ${rv.variation}: ${percentage}%`;
+                          html += `</div>`;
+                        });
+                      }
+                    }
+                  }
+                  
+                  if (flagValue.offVariation !== undefined) {
+                    html += `<div>Off variation: <span style="color: #333;">variation ${flagValue.offVariation}</span></div>`;
+                  }
+                  
+                  if (flagValue.rules && flagValue.rules.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Rules (${flagValue.rules.length}):</strong></div>`;
+                    flagValue.rules.forEach((rule, index) => {
+                      html += `<div style="margin-left: 12px; font-size: 10px; margin-bottom: 4px;">`;
+                      html += `<strong>Rule ${index + 1}:</strong>`;
+                      
+                      // Show variation or rollout
+                      if (rule.variation !== undefined) {
+                        html += ` → Variation ${rule.variation}`;
+                      } else if (rule.rollout) {
+                        html += ` → Rollout`;
+                      }
+                      
+                      // Show clauses
+                      if (rule.clauses && rule.clauses.length > 0) {
+                        html += `<div style="margin-left: 12px; margin-top: 2px;">`;
+                        rule.clauses.forEach((clause, clauseIndex) => {
+                          const negateText = clause.negate ? 'NOT ' : '';
+                          const attribute = clause.attribute || 'key';
+                          const op = clause.op || 'unknown';
+                          const values = clause.values || [];
+                          
+                          html += `<div style="color: #666;">`;
+                          html += `${negateText}${attribute} ${op} `;
+                          
+                          if (values.length === 1) {
+                            html += `"${this.escapeHtml(values[0])}"`;
+                          } else if (values.length > 1) {
+                            html += `[${values.map(v => `"${this.escapeHtml(v)}"`).join(', ')}]`;
+                          }
+                          
+                          html += `</div>`;
+                        });
+                        html += `</div>`;
+                      }
+                      
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  if (flagValue.targets && flagValue.targets.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Targets (${flagValue.targets.length}):</strong></div>`;
+                    flagValue.targets.forEach((target) => {
+                      const userCount = target.values ? target.values.length : 0;
+                      html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                      html += `Variation ${target.variation}: ${userCount} user(s)`;
+                      if (target.values && target.values.length > 0 && target.values.length <= 5) {
+                        // Show user keys if there are 5 or fewer
+                        html += ` - ${target.values.map(v => this.escapeHtml(v)).join(', ')}`;
+                      } else if (target.values && target.values.length > 5) {
+                        // Show first 5 and indicate there are more
+                        html += ` - ${target.values.slice(0, 5).map(v => this.escapeHtml(v)).join(', ')}, ...`;
+                      }
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  if (flagValue.prerequisites && flagValue.prerequisites.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Prerequisites (${flagValue.prerequisites.length}):</strong></div>`;
+                    flagValue.prerequisites.forEach((prereq, index) => {
+                      html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                      html += `${prereq.key} must be variation ${prereq.variation}`;
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  html += `</div>`;
+                } else {
+                  // Display simple cached value (streaming mode)
+                  html += `<div style="font-size: 11px; color: #666; line-height: 1.8;">`;
+                  html += `<div>Cached Value: <span style="color: #333; font-weight: 500;">${this.escapeHtml(JSON.stringify(flagValue))}</span></div>`;
+                  html += `<div style="font-size: 10px; color: #999; margin-top: 4px;">Streaming mode: showing evaluated value</div>`;
+                  html += `</div>`;
+                }
+                
                 html += `</div>`;
               });
               html += '</div>';
@@ -1533,12 +1671,6 @@
         } catch (error) {
           console.error(`Error fetching SDK cache for ${this.serviceId}:`, error);
           cacheElement.innerHTML = `<div style="color: #f44336;">Error: ${error.message}</div>`;
-        } finally {
-          // Re-enable button
-          if (cacheButton) {
-            cacheButton.disabled = false;
-            cacheButton.textContent = 'Refresh Flags';
-          }
         }
       }
     }
@@ -2478,22 +2610,6 @@
             nodeTestButton.disabled = false;
             nodeTestButton.textContent = 'Test Flag Evaluation';
           }
-        });
-      }
-      
-      // Node.js View Cache button
-      const nodeViewCacheButton = document.getElementById('node-view-cache');
-      if (nodeViewCacheButton) {
-        nodeViewCacheButton.addEventListener('click', async () => {
-          await nodePanel.fetchAndDisplayCache();
-        });
-      }
-      
-      // PHP View Cache button
-      const phpViewCacheButton = document.getElementById('php-view-cache');
-      if (phpViewCacheButton) {
-        phpViewCacheButton.addEventListener('click', async () => {
-          await phpPanel.fetchAndDisplayCache();
         });
       }
       

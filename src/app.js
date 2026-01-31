@@ -4,7 +4,7 @@ const path = require('path');
 const { exec } = require('child_process');
 const util = require('util');
 const crypto = require('crypto');
-const { getLaunchDarklyClient, getInitializationError, onFlagChange } = require('./launchdarkly');
+const { getLaunchDarklyClient, getInitializationError, getInspectableStore, onFlagChange } = require('./launchdarkly');
 
 const execPromise = util.promisify(exec);
 
@@ -305,11 +305,11 @@ function createApp() {
 
   // API endpoint to get SDK configuration
   app.get('/api/sdk-config', (req, res) => {
-    // Node.js always uses Relay Proxy mode
+    // Node.js always uses Proxy mode
     const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
     
     res.json({
-      mode: 'Relay Proxy Mode',
+      mode: 'Proxy Mode',
       relayProxyUrl: relayProxyUrl
     });
   });
@@ -890,13 +890,20 @@ function createApp() {
   app.get('/api/node/status', (req, res) => {
     const ldClient = getLaunchDarklyClient();
     const initError = getInitializationError();
+    const store = getInspectableStore();
     
     // Check if client is initialized using the SDK's built-in method
     const isInitialized = ldClient ? ldClient.initialized() : false;
     
+    // Also check if the store has been initialized with data
+    const storeHasData = store ? store.initialized : false;
+    
+    // Consider connected if either SDK reports initialized OR store has data
+    const connected = (isInitialized || storeHasData) && !initError;
+    
     res.json({
-      connected: isInitialized && !initError,
-      mode: 'Relay Proxy Mode',
+      connected: connected,
+      mode: 'Proxy Mode',
       sdkVersion: 'Node.js SDK',
       error: initError || null
     });
@@ -991,8 +998,41 @@ function createApp() {
     }
   });
 
-  // GET endpoint to get all flags state (SDK cache)
-  app.post('/api/node/all-flags', express.json(), async (req, res) => {
+  // Helper function to get flags from feature store
+  function getAllFlagsFromStore(store) {
+    return new Promise((resolve, reject) => {
+      // Check if store has the all() method
+      if (!store || typeof store.all !== 'function') {
+        reject(new Error('Feature store does not support all() method'));
+        return;
+      }
+      
+      console.log('Calling store.all("features", callback)...');
+      
+      store.all('features', (result) => {
+        console.log('store.all callback invoked with single parameter');
+        console.log('  result:', result);
+        console.log('  result type:', typeof result);
+        console.log('  result is null:', result === null);
+        console.log('  result is undefined:', result === undefined);
+        console.log('  result keys:', result ? Object.keys(result) : 'N/A');
+        
+        // The callback might only receive one parameter (the data)
+        // Check if result looks like flag data (has keys) or is empty/error
+        if (result && typeof result === 'object' && !Array.isArray(result)) {
+          const keys = Object.keys(result);
+          console.log('Resolving with data, keys:', keys);
+          resolve(result);
+        } else {
+          console.log('No data returned, resolving with empty object');
+          resolve({});
+        }
+      });
+    });
+  }
+
+  // Endpoint to get SDK data store (raw flag configurations)
+  app.post('/api/node/sdk-cache', express.json(), async (req, res) => {
     try {
       const ldClient = getLaunchDarklyClient();
       
@@ -1004,49 +1044,42 @@ function createApp() {
         });
       }
       
-      // Use context from request body if provided, otherwise use session
-      let nodeServiceContext;
-      if (req.body && req.body.context) {
-        // Use the context sent from the dashboard
-        nodeServiceContext = req.body.context;
-        console.log('=== All Flags Request (from body) ===');
-      } else {
-        // Fallback to session context
-        nodeServiceContext = req.session.nodeServiceContext;
-        console.log('=== All Flags Request (from session) ===');
+      console.log('=== SDK Data Store Request ===');
+      
+      // Get the inspectable store
+      const store = getInspectableStore();
+      
+      if (!store) {
+        return res.status(500).json({
+          success: false,
+          error: 'Inspectable store not available'
+        });
       }
       
-      // Build context
-      const context = buildNodeServiceContext({ session: { nodeServiceContext } });
+      // Get raw flag configurations from the store
+      const storeData = store.inspect();
+      const flags = storeData.features || {};
       
-      console.log('Session ID:', req.sessionID);
-      console.log('Full Context:', JSON.stringify(context, null, 2));
-      console.log('========================');
+      console.log('Raw flag configurations:', Object.keys(flags).length, 'flags');
+      console.log('Flag keys:', Object.keys(flags));
       
-      // Get all flags state
-      const flagsState = await ldClient.allFlagsState(context);
-      const allFlags = flagsState.allValues();
-      
-      console.log('Flag Values:', JSON.stringify(allFlags, null, 2));
+      // Debug: log the structure of one flag
+      if (Object.keys(flags).length > 0) {
+        const firstFlagKey = Object.keys(flags)[0];
+        console.log('Sample flag structure for', firstFlagKey, ':', JSON.stringify(flags[firstFlagKey], null, 2));
+      }
       
       res.json({
         success: true,
-        flags: allFlags,
-        valid: flagsState.valid,
-        context: {
-          type: nodeServiceContext.type,
-          key: context.user.key,
-          email: nodeServiceContext.email || null,
-          name: nodeServiceContext.name || null,
-          location: nodeServiceContext.location || null,
-          anonymous: nodeServiceContext.anonymous || false
-        }
+        flags: flags,
+        storeType: 'custom-inspectable',
+        contextIndependent: true
       });
     } catch (error) {
-      console.error('Error getting all flags:', error);
+      console.error('Error getting flags from data store:', error);
       res.status(500).json({
         success: false,
-        error: error.message
+        error: error.message || 'Failed to access data store'
       });
     }
   });

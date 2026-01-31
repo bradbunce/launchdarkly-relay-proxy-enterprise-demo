@@ -4,6 +4,85 @@ const LD = require('@launchdarkly/node-server-sdk');
 let ldClientInstance = null;
 let flagChangeCallbacks = [];
 let initializationError = null;
+let inspectableStore = null; // Store reference for inspection
+
+/**
+ * Custom Feature Store Wrapper for inspecting cached flag data
+ * This wraps the default in-memory store and allows us to inspect raw flag configurations
+ */
+class InspectableInMemoryStore {
+  constructor() {
+    this.data = {
+      features: {},
+      segments: {}
+    };
+    this.initialized = false;
+  }
+
+  init(allData, cb) {
+    console.log('=== INITIALIZING SDK CACHE ===');
+    this.data = allData || { features: {}, segments: {} };
+    this.initialized = true;
+    
+    console.log('Flags cached:', Object.keys(this.data.features).length);
+    console.log('Segments cached:', Object.keys(this.data.segments).length);
+    
+    if (cb) cb();
+    return Promise.resolve();
+  }
+
+  get(kind, key, cb) {
+    console.log(`[Store] GET called with kind:`, typeof kind, JSON.stringify(kind), `key:`, key);
+    
+    // Handle if kind is an object (newer SDK versions)
+    const kindStr = typeof kind === 'object' ? kind.namespace : kind;
+    
+    const item = this.data[kindStr] ? this.data[kindStr][key] : null;
+    console.log(`[Store] GET ${kindStr}/${key}:`, item ? 'found' : 'not found');
+    if (cb) cb(item);
+    return Promise.resolve(item);
+  }
+
+  all(kind, cb) {
+    console.log(`[Store] ALL called with kind:`, typeof kind, JSON.stringify(kind));
+    
+    // Handle if kind is an object (newer SDK versions)
+    const kindStr = typeof kind === 'object' ? kind.namespace : kind;
+    
+    const items = this.data[kindStr] || {};
+    if (cb) cb(items);
+    return Promise.resolve(items);
+  }
+
+  upsert(kind, item, cb) {
+    // Handle if kind is an object (newer SDK versions)
+    const kindStr = typeof kind === 'object' ? kind.namespace : kind;
+    
+    console.log(`=== CACHE UPDATE: ${kindStr}/${item.key} ===`);
+    
+    if (!this.data[kindStr]) this.data[kindStr] = {};
+    this.data[kindStr][item.key] = item;
+    if (cb) cb();
+    return Promise.resolve();
+  }
+
+  initialized(cb) {
+    if (cb) cb(this.initialized);
+    return Promise.resolve(this.initialized);
+  }
+
+  close() {
+    return Promise.resolve();
+  }
+
+  // Method to inspect current state
+  inspect() {
+    return {
+      features: this.data.features,
+      segments: this.data.segments
+    };
+  }
+}
 
 /**
  * Initialize LaunchDarkly SDK client as a singleton
@@ -30,16 +109,20 @@ async function initializeLaunchDarkly(config) {
   }
 
   try {
-    console.log('Node.js SDK: Relay Proxy Mode');
+    console.log('Node.js SDK: Proxy Mode');
     console.log(`Relay Proxy URL: ${relayProxyUrl}`);
     
-    // Standard relay proxy configuration
+    // Create inspectable feature store
+    inspectableStore = new InspectableInMemoryStore();
+    
+    // Standard relay proxy configuration with custom feature store
     const ldConfig = {
       baseUri: relayProxyUrl,
       streamUri: relayProxyUrl,
       eventsUri: relayProxyUrl,
       stream: true,
-      sendEvents: true
+      sendEvents: true,
+      featureStore: inspectableStore
     };
 
     // Initialize SDK
@@ -120,6 +203,14 @@ function getLaunchDarklyClient() {
 }
 
 /**
+ * Get the inspectable feature store
+ * @returns {Object|null} Inspectable store instance or null if not initialized
+ */
+function getInspectableStore() {
+  return inspectableStore;
+}
+
+/**
  * Get the initialization error if any
  * @returns {string|null} Error message or null if no error
  */
@@ -160,6 +251,7 @@ async function closeLaunchDarkly() {
 module.exports = { 
   initializeLaunchDarkly, 
   getLaunchDarklyClient,
+  getInspectableStore,
   getInitializationError,
   onFlagChange,
   closeLaunchDarkly

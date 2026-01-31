@@ -116,10 +116,40 @@ docker-compose down
 The demo application provides:
 
 1. **Feature Flag Display**: Shows the current value of the `user-message` flag
-2. **User Context Selector**: Switch between anonymous and custom user contexts
-3. **Container Logs**: Real-time logs from both app-dev and relay-proxy containers
-4. **Relay Proxy Status**: Detailed status information and performance metrics
-5. **Load Testing**: Built-in load testing tool
+2. **SDK Data Store Display**: View raw flag configurations cached by the SDK (context-independent)
+3. **User Context Selector**: Switch between anonymous and custom user contexts
+4. **Container Logs**: Real-time logs from both app-dev and relay-proxy containers
+5. **Relay Proxy Status**: Detailed status information and performance metrics
+6. **Load Testing**: Built-in load testing tool
+
+### SDK Data Store Display
+
+Each service panel includes an "SDK Data Store" section that displays the raw flag configurations cached locally by the SDK:
+
+**What You Can See:**
+- **Raw Flag Configurations**: Complete flag structure as stored in the SDK's internal data store
+- **Variations**: All possible flag values with their indices
+- **Targeting Rules**: Detailed rules with clauses, operators, and conditions
+- **Percentage Rollouts**: Rollout configurations with variation weights
+- **Individual Targets**: User keys explicitly targeted to specific variations
+- **Prerequisites**: Flag dependencies if configured
+- **Version Information**: Flag version numbers and enabled/disabled state
+
+**Key Features:**
+- **Context-Independent**: Shows raw flag data, not evaluated values for specific users
+- **Always Visible**: Automatically displays when the SDK initializes
+- **Auto-Refresh**: Automatically updates when flags change in LaunchDarkly
+- **Real-Time Updates**: SSE keeps the display current without manual interaction
+
+**Node.js vs PHP:**
+- **Node.js**: Shows data from the SDK's in-memory feature store (Proxy Mode)
+- **PHP**: Shows data from the Redis data store (Daemon Mode)
+
+This feature is useful for:
+- Understanding how flags are structured internally
+- Debugging targeting rules and rollouts
+- Verifying flag configurations are cached correctly
+- Learning how LaunchDarkly stores flag data
 
 ### User Context Management
 
@@ -145,7 +175,7 @@ The application uses Server-Sent Events (SSE) to push flag changes instantly:
 
 The dashboard maintains persistent SSE connections to both Node.js and PHP services for real-time flag updates:
 
-**Node.js (Relay Proxy Mode):**
+**Node.js (Proxy Mode):**
 - Receives instant push updates via streaming from Relay Proxy
 - Updates appear immediately when flags change in LaunchDarkly
 - Connection stays open indefinitely
@@ -212,7 +242,7 @@ Comprehensive status dashboard showing:
 Built-in load testing tool to measure SDK performance for both Node.js and PHP applications:
 
 **Configuration:**
-- Target Service: Node.js (Relay Proxy Mode) or PHP (Daemon Mode)
+- Target Service: Node.js (Proxy Mode) or PHP (Daemon Mode)
 - Number of Requests: 1-1000 total flag evaluations
 - Concurrency: 1-100 simultaneous requests
 
@@ -224,7 +254,7 @@ Built-in load testing tool to measure SDK performance for both Node.js and PHP a
 - Requests per second (throughput)
 
 **Performance Comparison:**
-- **Node.js (Relay Proxy Mode)**: ~10-50ms average latency, moderate throughput
+- **Node.js (Proxy Mode)**: ~10-50ms average latency, moderate throughput
   - Evaluates flags through Relay Proxy over HTTP
   - Demonstrates real-world network latency
   - Suitable for interactive applications
@@ -283,7 +313,7 @@ This application uses a microservices architecture with six specialized containe
 - Node.js 24 Alpine
 - Express web server
 - LaunchDarkly SDK v9.10.5
-- **Fixed Mode**: Relay Proxy Mode only
+- **Fixed Mode**: Proxy Mode only
 - Port: 3000
 - Purpose: LaunchDarkly Node.js SDK demonstration
 
@@ -331,7 +361,7 @@ All containers communicate via a custom Docker bridge network (`launchdarkly-net
 
 This demo showcases SDK integration with a shared Redis backend, with each application using a distinct, optimized integration pattern:
 
-**Node.js Application** (Relay Proxy Mode only):
+**Node.js Application** (Proxy Mode only):
 - All SDK traffic goes through the Relay Proxy
 - Receives real-time flag updates via streaming
 - Sends analytics events through the Relay Proxy
@@ -443,7 +473,7 @@ const client = LD.init(sdkKey, {
   eventsUri: 'http://relay-proxy:8030'
 });
 
-// Note: This demo uses Relay Proxy Mode (shown above) for Node.js
+// Note: This demo uses Proxy Mode (shown above) for Node.js
 // For daemon mode with direct Redis access (like the PHP app), you would use:
 // const RedisFeatureStore = require('launchdarkly-node-server-sdk/integrations').Redis;
 // const client = LD.init(sdkKey, {
@@ -521,9 +551,9 @@ The SDK is configured as a singleton with:
 
 The Node.js and PHP applications use distinct, optimized integration patterns with LaunchDarkly.
 
-### Node.js SDK - Relay Proxy Mode
+### Node.js SDK - Proxy Mode
 
-The Node.js application always uses Relay Proxy mode for all SDK operations:
+The Node.js application always uses Proxy mode for all SDK operations:
 
 ```javascript
 const LD = require('@launchdarkly/node-server-sdk');
@@ -606,7 +636,7 @@ docker exec redis redis-cli KEYS "*"
 
 ### Configuration Comparison
 
-| Feature | Node.js (Relay Proxy Mode) | PHP (Daemon Mode) |
+| Feature | Node.js (Proxy Mode) | PHP (Daemon Mode) |
 |---------|---------------------------|-------------------|
 | Flag Source | Relay Proxy | Redis Direct |
 | Real-time Updates | Yes (streaming) | Yes (polling every 5s) |
@@ -668,7 +698,7 @@ The PHP application demonstrates daemon mode by reading feature flags from the s
 
 **Data Flow**:
 1. Relay Proxy fetches flags from LaunchDarkly and stores in Redis
-2. Node.js app connects to Relay Proxy via HTTP (Relay Proxy Mode)
+2. Node.js app connects to Relay Proxy via HTTP (Proxy Mode)
 3. PHP app reads flags directly from Redis (Daemon Mode)
 
 ### Accessing the PHP Application
@@ -736,7 +766,7 @@ The Relay Proxy and PHP application share the same Redis instance for feature fl
 
 **How It Works**:
 1. Relay Proxy populates Redis with flag data for all configured environments
-2. Node.js SDK connects to Relay Proxy via HTTP (Relay Proxy Mode - no direct Redis access)
+2. Node.js SDK connects to Relay Proxy via HTTP (Proxy Mode - no direct Redis access)
 3. PHP SDK reads directly from Redis using the same key prefix (Daemon Mode)
 4. Relay Proxy uses Redis as its cache, PHP reads from that same cache
 5. When flags change in LaunchDarkly, Relay Proxy updates Redis

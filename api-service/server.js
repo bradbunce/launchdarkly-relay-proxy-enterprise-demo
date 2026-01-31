@@ -875,8 +875,8 @@ app.post('/api/php/test-evaluation', async (req, res) => {
   }
 });
 
-// PHP all-flags proxy endpoint
-app.post('/api/php/all-flags', async (req, res) => {
+// PHP redis-cache proxy endpoint
+app.post('/api/php/redis-cache', async (req, res) => {
   const phpUrl = process.env.PHP_APP_URL || 'http://php-app-dev:80';
   
   try {
@@ -889,7 +889,7 @@ app.post('/api/php/all-flags', async (req, res) => {
     }
     
     // Forward the context from request body
-    const response = await fetchWithTimeout(`${phpUrl}/api/all-flags`, {
+    const response = await fetchWithTimeout(`${phpUrl}/api/redis-cache`, {
       method: 'POST',
       headers: headers,
       body: JSON.stringify(req.body)
@@ -905,8 +905,8 @@ app.post('/api/php/all-flags', async (req, res) => {
     
     res.status(response.status).json(data);
   } catch (error) {
-    logError('/api/php/all-flags', error, {
-      phpUrl: `${phpUrl}/api/all-flags`
+    logError('/api/php/redis-cache', error, {
+      phpUrl: `${phpUrl}/api/redis-cache`
     });
     res.status(500).json({
       success: false,

@@ -45,7 +45,7 @@ function loadConfig() {
   // Log configuration (without sensitive values)
   console.log('Configuration loaded:');
   console.log(`  Port: ${config.app.port}`);
-  console.log(`  Node.js SDK: Relay Proxy Mode`);
+  console.log(`  Node.js SDK: Proxy Mode`);
   console.log(`  Relay Proxy URL: ${config.launchDarkly.relayProxyUrl}`);
   console.log(`  SDK Key: ${config.launchDarkly.sdkKey ? '[SET]' : '[NOT SET]'}`);
 

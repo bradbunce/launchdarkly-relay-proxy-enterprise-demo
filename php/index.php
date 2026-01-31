@@ -359,87 +359,64 @@ if ($requestUri === '/api/test-evaluation' && $requestMethod === 'POST') {
     exit;
 }
 
-// API: Get all flags state (SDK cache)
-if ($requestUri === '/api/all-flags' && $requestMethod === 'POST') {
+// API: Get Redis data store (raw flag configurations)
+if ($requestUri === '/api/redis-cache' && $requestMethod === 'POST') {
     header('Content-Type: application/json');
     
     try {
-        // Use the global client
-        $client = getLDClient();
+        // Access Redis directly to get raw flag configurations (context-independent)
+        $redisHost = getenv('REDIS_HOST') ?: 'redis';
+        $redisPort = getenv('REDIS_PORT') ?: 6379;
+        $redisPrefix = getenv('REDIS_PREFIX') ?: '';
         
-        if (!$client) {
+        // Initialize Redis client
+        $redisClient = new Predis\Client([
+            'scheme' => 'tcp',
+            'host' => $redisHost,
+            'port' => (int)$redisPort
+        ]);
+        
+        // Test Redis connection
+        try {
+            $redisClient->ping();
+        } catch (Exception $e) {
             http_response_code(500);
             echo json_encode([
                 'success' => false,
-                'error' => $ldClientError ?? 'SDK not initialized'
+                'error' => 'Redis not accessible: ' . $e->getMessage()
             ]);
             exit;
         }
         
-        // Check if context is provided in request body (from dashboard)
-        $input = json_decode(file_get_contents('php://input'), true);
+        log_message("=== Redis Data Store Request ===");
+        log_message("Accessing Redis directly (context-independent)");
+        log_message("Redis prefix: " . ($redisPrefix ?: '(none)'));
         
-        if (isset($input['context'])) {
-            // Use context from request body (sent by dashboard)
-            $contextData = $input['context'];
-            
-            // Ensure we have a key - use session key if missing
-            if (empty($contextData['key'])) {
-                if (!empty($contextData['email'])) {
-                    $contextData['key'] = $contextData['email'];
-                } elseif (isset($_SESSION['php_service_context']['key'])) {
-                    // Use the session's key to maintain consistency
-                    $contextData['key'] = $_SESSION['php_service_context']['key'];
-                } else {
-                    $contextData['key'] = 'php-anon-' . uniqid();
-                }
-            }
-            
-            $contextBuilder = \LaunchDarkly\LDContext::builder($contextData['key']);
-            $contextBuilder->kind('user');
-            
-            if (isset($contextData['name'])) {
-                $contextBuilder->name($contextData['name']);
-            }
-            if (isset($contextData['email'])) {
-                $contextBuilder->set('email', $contextData['email']);
-            }
-            if (isset($contextData['location'])) {
-                $contextBuilder->set('location', $contextData['location']);
-            }
-            if (isset($contextData['anonymous'])) {
-                $contextBuilder->set('anonymous', $contextData['anonymous']);
-            }
-            
-            $context = $contextBuilder->build();
-        } else {
-            // Fallback to session context
-            $context = buildContextFromSession();
-            $contextData = $_SESSION['php_service_context'];
+        // Get all flag keys from Redis
+        // The LaunchDarkly Relay Proxy stores flags with the pattern: {prefix}:features
+        $flagsKey = $redisPrefix ? "{$redisPrefix}:features" : "features";
+        
+        log_message("Looking for flags at key: {$flagsKey}");
+        
+        // Get flags from Redis hash
+        $allFlags = $redisClient->hgetall($flagsKey);
+        
+        // Parse JSON values
+        $parsedFlags = [];
+        foreach ($allFlags as $key => $value) {
+            $parsedFlags[$key] = json_decode($value, true);
         }
         
-        // Get all flags state
-        $allFlagsState = $client->allFlagsState($context);
-        $allFlags = $allFlagsState->toValuesMap();
-        
-        log_message("PHP SDK: All Flags request - Context key: " . $context->getKey());
-        log_message("PHP SDK: All Flags - user-message value: " . ($allFlags['user-message'] ?? 'NOT FOUND'));
+        log_message("Raw Flag Configurations: " . count($parsedFlags) . " flags");
         
         echo json_encode([
             'success' => true,
-            'flags' => $allFlags,
-            'valid' => $allFlagsState->isValid(),
-            'context' => [
-                'type' => $contextData['type'],
-                'key' => $context->getKey(),
-                'email' => $contextData['email'] ?? null,
-                'name' => $contextData['name'] ?? null,
-                'location' => $contextData['location'] ?? null,
-                'anonymous' => $contextData['anonymous'] ?? false
-            ]
+            'flags' => $parsedFlags,
+            'storeType' => 'redis',
+            'contextIndependent' => true
         ]);
     } catch (Exception $e) {
-        log_message("PHP SDK ERROR getting all flags: " . $e->getMessage());
+        log_message("PHP ERROR getting Redis data store: " . $e->getMessage());
         http_response_code(500);
         echo json_encode([
             'success' => false,
