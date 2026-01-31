@@ -682,19 +682,36 @@ if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
         // Send actual flag value
         sendSSE($message);
         
-        // Keep connection alive without polling
+        // Keep connection alive with periodic heartbeats
         // In daemon mode, flags are read from Redis. The Relay Proxy updates Redis when flags change.
-        // We don't need to poll - just keep the connection open for the client.
-        // Flag updates will happen when the user changes context or tests evaluation.
+        // We send periodic heartbeats to detect client disconnects faster.
+        $heartbeatInterval = 15; // seconds between heartbeats
+        $maxConnectionTime = 300; // 5 minutes max connection time
+        $connectionStart = time();
+        
         while (true) {
-            // Just keep connection alive, check every 5 seconds
-            sleep(5);
-            
             // Check if connection is still alive
             if (connection_aborted()) {
                 log_message("PHP SDK: SSE connection aborted by client");
                 break;
             }
+            
+            // Check if we've exceeded max connection time
+            if ((time() - $connectionStart) > $maxConnectionTime) {
+                log_message("PHP SDK: SSE connection exceeded max time, closing");
+                sendSSE('Connection timeout - please refresh');
+                break;
+            }
+            
+            // Send heartbeat comment (keeps connection alive, doesn't trigger client event)
+            echo ": heartbeat\n\n";
+            if (ob_get_level() > 0) {
+                ob_flush();
+            }
+            flush();
+            
+            // Sleep for heartbeat interval
+            sleep($heartbeatInterval);
         }
         
     } catch (Exception $e) {
@@ -707,6 +724,9 @@ if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
 
 // Handle Redis monitor SSE endpoint
 if ($requestUri === '/redis-monitor') {
+    // Make PHP responsive to client disconnects
+    ignore_user_abort(false);
+    
     header('Content-Type: text/event-stream');
     header('Cache-Control: no-cache');
     header('Connection: keep-alive');
@@ -718,7 +738,22 @@ if ($requestUri === '/redis-monitor') {
     $handle = popen('redis-cli -h redis MONITOR 2>&1', 'r');
     if ($handle) {
         stream_set_blocking($handle, false);
+        $maxConnectionTime = 300; // 5 minutes max
+        $connectionStart = time();
+        
         while (true) {
+            // Check if connection is still alive
+            if (connection_aborted()) {
+                log_message("Redis monitor: Connection aborted by client");
+                break;
+            }
+            
+            // Check if we've exceeded max connection time
+            if ((time() - $connectionStart) > $maxConnectionTime) {
+                log_message("Redis monitor: Connection exceeded max time, closing");
+                break;
+            }
+            
             $line = fgets($handle);
             if ($line !== false && trim($line) !== '') {
                 // Clean up the monitor output
@@ -727,11 +762,6 @@ if ($requestUri === '/redis-monitor') {
                 flush();
             }
             usleep(50000); // 50ms
-            
-            // Check if connection is still alive
-            if (connection_aborted()) {
-                break;
-            }
         }
         pclose($handle);
     }
