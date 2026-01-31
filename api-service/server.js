@@ -511,6 +511,7 @@ app.get('/api/relay-proxy/cache/stream', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   
   try {
     // Initialize the client if not already done
@@ -528,7 +529,10 @@ app.get('/api/relay-proxy/cache/stream', async (req, res) => {
         flags: relayProxyCacheData.flags,
         timestamp: Date.now()
       });
+      console.log(`[Relay Proxy Cache] Sending initial data to new client: ${Object.keys(relayProxyCacheData.flags).length} flags`);
       res.write(`data: ${data}\n\n`);
+    } else {
+      console.log('[Relay Proxy Cache] No initial data available yet');
     }
     
     // Handle client disconnect

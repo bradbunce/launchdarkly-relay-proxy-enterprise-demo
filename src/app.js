@@ -1084,6 +1084,78 @@ function createApp() {
     }
   });
 
+  // SSE stream endpoint for Node.js SDK cache updates
+  let nodeSdkCacheClients = [];
+  
+  app.get('/api/node/sdk-cache/stream', (req, res) => {
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    const ldClient = getLaunchDarklyClient();
+    const store = getInspectableStore();
+    
+    if (!ldClient || !store) {
+      res.write(`data: ${JSON.stringify({ error: 'SDK not initialized' })}\n\n`);
+      return res.end();
+    }
+    
+    // Add this client to the list
+    nodeSdkCacheClients.push(res);
+    console.log(`[Node SDK Cache] SSE client connected (${nodeSdkCacheClients.length} total)`);
+    
+    // Send initial data immediately
+    const storeData = store.inspect();
+    const flags = storeData.features || {};
+    const data = JSON.stringify({
+      flags: flags,
+      timestamp: Date.now()
+    });
+    console.log(`[Node SDK Cache] Sending initial data: ${Object.keys(flags).length} flags`);
+    res.write(`data: ${data}\n\n`);
+    
+    // Handle client disconnect
+    req.on('close', () => {
+      nodeSdkCacheClients = nodeSdkCacheClients.filter(client => client !== res);
+      console.log(`[Node SDK Cache] SSE client disconnected (${nodeSdkCacheClients.length} remaining)`);
+    });
+  });
+  
+  // Register flag change listener to broadcast updates
+  onFlagChange((settings) => {
+    if (nodeSdkCacheClients.length === 0) {
+      return;
+    }
+    
+    const store = getInspectableStore();
+    if (!store) {
+      return;
+    }
+    
+    const storeData = store.inspect();
+    const flags = storeData.features || {};
+    const data = JSON.stringify({
+      flags: flags,
+      timestamp: Date.now()
+    });
+    
+    console.log(`[Node SDK Cache] Broadcasting update to ${nodeSdkCacheClients.length} clients`);
+    
+    // Send to all connected clients
+    nodeSdkCacheClients = nodeSdkCacheClients.filter(client => {
+      try {
+        client.write(`data: ${data}\n\n`);
+        return true;
+      } catch (error) {
+        console.log('[Node SDK Cache] Client disconnected during broadcast');
+        return false;
+      }
+    });
+  });
+
   
   return app;
 }

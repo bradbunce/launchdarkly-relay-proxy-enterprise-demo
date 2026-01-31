@@ -2085,8 +2085,168 @@
         cacheElement.innerHTML = html;
       }
       
+      // Render Node SDK cache (reuses same logic as Relay Proxy)
+      function renderNodeSDKCache(flags) {
+        const cacheElement = document.getElementById('node-sdk-cache');
+        if (!cacheElement) return;
+        
+        const flagKeys = Object.keys(flags);
+        let html = '';
+        
+        if (flagKeys.length === 0) {
+          html += '<div style="color: #999; font-style: italic;">No flags in Node SDK cache</div>';
+        } else {
+          html += renderFlagList(flags);
+        }
+        
+        cacheElement.innerHTML = html;
+      }
+      
+      // Render Redis data store (reuses same logic as Relay Proxy)
+      function renderRedisDataStore(flags) {
+        const dataStoreElement = document.getElementById('redis-data-store');
+        if (!dataStoreElement) return;
+        
+        const flagKeys = Object.keys(flags);
+        let html = '';
+        
+        if (flagKeys.length === 0) {
+          html += '<div style="color: #999; font-style: italic;">No flags in Redis</div>';
+        } else {
+          html += renderFlagList(flags);
+        }
+        
+        dataStoreElement.innerHTML = html;
+      }
+      
+      // Shared function to render flag list (DRY principle)
+      function renderFlagList(flags) {
+        const flagKeys = Object.keys(flags);
+        let html = '<div style="font-family: monospace;">';
+        
+        flagKeys.forEach(key => {
+          const flagValue = flags[key];
+          const isComplexConfig = flagValue && typeof flagValue === 'object' && flagValue.version !== undefined;
+          
+          html += `<div style="margin-bottom: 12px; padding: 8px; background-color: white; border-radius: 3px; border: 1px solid #e0e0e0;">`;
+          html += `<div style="margin-bottom: 4px;"><strong style="color: #405BFF;">${escapeHtml(key)}</strong></div>`;
+          
+          if (isComplexConfig) {
+            html += `<div style="font-size: 11px; color: #666; line-height: 1.8;">`;
+            html += `<div>Version: <span style="color: #333;">${flagValue.version || 'N/A'}</span></div>`;
+            html += `<div>Enabled: <span style="color: #333;">${flagValue.on ? 'Yes' : 'No'}</span></div>`;
+            
+            if (flagValue.variations && flagValue.variations.length > 0) {
+              html += `<div style="margin-top: 6px;"><strong>Variations (${flagValue.variations.length}):</strong></div>`;
+              flagValue.variations.forEach((variation, index) => {
+                const varValue = typeof variation === 'object' ? JSON.stringify(variation) : variation;
+                html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                html += `[${index}]: <span style="color: #405BFF; font-weight: 500;">${escapeHtml(varValue)}</span>`;
+                html += `</div>`;
+              });
+            }
+            
+            if (flagValue.fallthrough) {
+              if (flagValue.fallthrough.variation !== undefined) {
+                html += `<div style="margin-top: 6px;">Default (fallthrough): <span style="color: #333;">variation ${flagValue.fallthrough.variation}</span></div>`;
+              } else if (flagValue.fallthrough.rollout) {
+                html += `<div style="margin-top: 6px;"><strong>Default (rollout):</strong></div>`;
+                const rollout = flagValue.fallthrough.rollout;
+                if (rollout.variations) {
+                  rollout.variations.forEach((rv) => {
+                    const percentage = (rv.weight / 1000).toFixed(1);
+                    html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                    html += `Variation ${rv.variation}: ${percentage}%`;
+                    html += `</div>`;
+                  });
+                }
+              }
+            }
+            
+            if (flagValue.offVariation !== undefined) {
+              html += `<div>Off variation: <span style="color: #333;">variation ${flagValue.offVariation}</span></div>`;
+            }
+            
+            if (flagValue.rules && flagValue.rules.length > 0) {
+              html += `<div style="margin-top: 6px;"><strong>Rules (${flagValue.rules.length}):</strong></div>`;
+              flagValue.rules.forEach((rule, index) => {
+                html += `<div style="margin-left: 12px; font-size: 10px; margin-bottom: 4px;">`;
+                html += `<strong>Rule ${index + 1}:</strong>`;
+                
+                if (rule.variation !== undefined) {
+                  html += ` → Variation ${rule.variation}`;
+                } else if (rule.rollout) {
+                  html += ` → Rollout`;
+                }
+                
+                if (rule.clauses && rule.clauses.length > 0) {
+                  html += `<div style="margin-left: 12px; margin-top: 2px;">`;
+                  rule.clauses.forEach((clause) => {
+                    const negateText = clause.negate ? 'NOT ' : '';
+                    const attribute = clause.attribute || 'key';
+                    const op = clause.op || 'unknown';
+                    const values = clause.values || [];
+                    
+                    html += `<div style="color: #666;">`;
+                    html += `${negateText}${attribute} ${op} `;
+                    
+                    if (values.length === 1) {
+                      html += `"${escapeHtml(values[0])}"`;
+                    } else if (values.length > 1) {
+                      html += `[${values.map(v => `"${escapeHtml(v)}"`).join(', ')}]`;
+                    }
+                    
+                    html += `</div>`;
+                  });
+                  html += `</div>`;
+                }
+                
+                html += `</div>`;
+              });
+            }
+            
+            if (flagValue.targets && flagValue.targets.length > 0) {
+              html += `<div style="margin-top: 6px;"><strong>Targets (${flagValue.targets.length}):</strong></div>`;
+              flagValue.targets.forEach((target) => {
+                const userCount = target.values ? target.values.length : 0;
+                html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                html += `Variation ${target.variation}: ${userCount} user(s)`;
+                if (target.values && target.values.length > 0 && target.values.length <= 5) {
+                  html += ` - ${target.values.map(v => escapeHtml(v)).join(', ')}`;
+                } else if (target.values && target.values.length > 5) {
+                  html += ` - ${target.values.slice(0, 5).map(v => escapeHtml(v)).join(', ')}, ...`;
+                }
+                html += `</div>`;
+              });
+            }
+            
+            if (flagValue.prerequisites && flagValue.prerequisites.length > 0) {
+              html += `<div style="margin-top: 6px;"><strong>Prerequisites (${flagValue.prerequisites.length}):</strong></div>`;
+              flagValue.prerequisites.forEach((prereq) => {
+                html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                html += `${escapeHtml(prereq.key)} must be variation ${prereq.variation}`;
+                html += `</div>`;
+              });
+            }
+            
+            html += `</div>`;
+          } else {
+            html += `<div style="font-size: 11px; color: #666; line-height: 1.8;">`;
+            html += `<div>Value: <span style="color: #333; font-weight: 500;">${escapeHtml(JSON.stringify(flagValue))}</span></div>`;
+            html += `</div>`;
+          }
+          
+          html += `</div>`;
+        });
+        html += '</div>';
+        
+        return html;
+      }
+      
       // Connect to Relay Proxy cache SSE stream for real-time updates
       let relayProxyCacheEventSource = null;
+      let nodeSdkCacheEventSource = null;
+      let redisCacheEventSource = null;
       
       function connectRelayProxyCacheStream() {
         const cacheElement = document.getElementById('relay-proxy-cache');
@@ -2119,6 +2279,9 @@
               if (data.flags) {
                 console.log('[Relay Proxy Cache] Received update:', Object.keys(data.flags).length, 'flags');
                 renderRelayProxyCache(data.flags);
+                
+                // Also update Redis display since Redis is updated by Relay Proxy
+                renderRedisDataStore(data.flags);
               }
             } catch (error) {
               console.error('Error parsing Relay Proxy cache update:', error);
@@ -2140,6 +2303,62 @@
           console.log('[Relay Proxy Cache] SSE stream connected');
         } catch (error) {
           console.error('Error connecting to Relay Proxy cache stream:', error);
+          cacheElement.innerHTML = `<div style="color: #f44336;">Error: ${error.message}</div>`;
+        }
+      }
+      
+      function connectNodeSdkCacheStream() {
+        const cacheElement = document.getElementById('node-sdk-cache');
+        
+        if (!cacheElement) {
+          console.error('Node SDK cache element not found');
+          return;
+        }
+        
+        // Close existing connection if any
+        if (nodeSdkCacheEventSource) {
+          nodeSdkCacheEventSource.close();
+        }
+        
+        // Show loading state
+        cacheElement.innerHTML = '<div style="color: #999; font-style: italic;">Connecting...</div>';
+        
+        try {
+          nodeSdkCacheEventSource = new EventSource('http://localhost:3000/api/node/sdk-cache/stream');
+          
+          nodeSdkCacheEventSource.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              
+              if (data.error) {
+                cacheElement.innerHTML = `<div style="color: #f44336;">Error: ${data.error}</div>`;
+                return;
+              }
+              
+              if (data.flags) {
+                console.log('[Node SDK Cache] Received update:', Object.keys(data.flags).length, 'flags');
+                renderNodeSDKCache(data.flags);
+              }
+            } catch (error) {
+              console.error('Error parsing Node SDK cache update:', error);
+            }
+          };
+          
+          nodeSdkCacheEventSource.onerror = (error) => {
+            console.error('Node SDK cache SSE error:', error);
+            cacheElement.innerHTML = '<div style="color: #f44336;">Connection error - retrying...</div>';
+            
+            // Reconnect after 5 seconds
+            setTimeout(() => {
+              if (nodeSdkCacheEventSource && nodeSdkCacheEventSource.readyState === EventSource.CLOSED) {
+                connectNodeSdkCacheStream();
+              }
+            }, 5000);
+          };
+          
+          console.log('[Node SDK Cache] SSE stream connected');
+        } catch (error) {
+          console.error('Error connecting to Node SDK cache stream:', error);
           cacheElement.innerHTML = `<div style="color: #f44336;">Error: ${error.message}</div>`;
         }
       }
@@ -2461,6 +2680,11 @@
               if (contextButton) contextButton.style.display = 'inline-block';
               if (testButton) testButton.style.display = 'inline-block';
               if (viewCacheButton) viewCacheButton.style.display = 'inline-block';
+              
+              // Connect to Node SDK cache SSE stream when connected
+              if (!nodeSdkCacheEventSource || nodeSdkCacheEventSource.readyState === EventSource.CLOSED) {
+                connectNodeSdkCacheStream();
+              }
             } else if (data.running === false) {
               // Node.js container exists but is stopped
               updatePillStatus('node', 'stopped');
