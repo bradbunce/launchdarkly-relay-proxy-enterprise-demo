@@ -188,6 +188,29 @@ This feature is useful for:
 - Automatic geolocation detection
 - Multi-context with container kind
 
+**Context Persistence Across SSE Connections:**
+
+The application uses specialized context stores to ensure user context (including location attributes) persists across Server-Sent Events (SSE) connections:
+
+**Node.js Context Store:**
+- In-memory Map stores context by contextKey
+- SSE connections pass contextKey in URL query parameter
+- Context updates via POST endpoint stored in both session and in-memory store
+- Ensures location attribute is available for flag evaluation in SSE endpoint
+
+**PHP Context Store:**
+- File-based store at `/tmp/php-context-store.json`
+- Required because PHP doesn't maintain memory between requests
+- SSE connections read from file store using contextKey
+- Context updates stored in both session and file store
+- Enables location-based targeting in daemon mode
+
+**Why This Matters:**
+- EventSource (SSE) creates separate HTTP connections that don't share session state
+- Without context stores, location attributes wouldn't reach flag evaluation
+- Enables targeting rules based on `user.location` attribute
+- Works seamlessly for both Node.js (Proxy Mode) and PHP (Daemon Mode)
+
 ### Real-Time Flag Updates
 
 The application uses Server-Sent Events (SSE) to push flag changes instantly:
@@ -1242,6 +1265,8 @@ docker-compose restart redis php
 
 ### Recommended Flag Setup
 
+#### Primary Demo Flag: user-message
+
 **Flag Key**: `user-message`
 **Type**: String (multi-variate)
 
@@ -1249,6 +1274,37 @@ docker-compose restart redis php
 1. "Hello from LaunchDarkly!"
 2. "Welcome to the demo!"
 3. "Greetings from the Relay Proxy!"
+
+#### UI Control Flag: terminal-panels
+
+**Flag Key**: `terminal-panels`
+**Type**: Boolean
+**Purpose**: Controls visibility of terminal log panels in the dashboard
+
+**Variations**:
+- `true`: Show terminal panels (default)
+- `false`: Hide terminal panels and expand data store windows
+
+**Behavior**:
+- **Real-time Updates**: Changes apply instantly without browser refresh via SSE
+- **Smooth Transitions**: CSS animations provide smooth show/hide effects
+- **Dynamic Layout**: When hidden, data store windows expand to use freed space
+- **Context**: Evaluated with anonymous context (not user-specific)
+
+**Use Cases**:
+- Hide terminal panels during presentations for cleaner UI
+- Focus on data store content without log distractions
+- Demonstrate real-time UI control via feature flags
+- Show dynamic layout adjustments based on flag state
+
+**Technical Details**:
+- Terminal panels occupy 514px of vertical space when visible
+- Data store windows expand by varying amounts when terminals hidden:
+  - Node.js SDK Cache: 280px → 794px
+  - PHP SDK Cache: 280px → 794px
+  - Relay Proxy Cache: 400px → 680px
+  - Redis Data Store: 517px → 750px
+- All panels maintain scrolling functionality in both states
 
 **Targeting Examples**:
 
