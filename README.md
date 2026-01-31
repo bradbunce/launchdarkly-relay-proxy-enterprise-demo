@@ -406,15 +406,16 @@ const client = LD.init(sdkKey, {
   eventsUri: 'http://relay-proxy:8030'
 });
 
-// Option 2: Direct Redis access (requires Redis feature store)
-const RedisFeatureStore = require('launchdarkly-node-server-sdk/integrations').Redis;
-const client = LD.init(sdkKey, {
-  featureStore: RedisFeatureStore({
-    redisOpts: { host: 'redis', port: 6379 },
-    prefix: 'ld-flags',
-    cacheTTL: 30
-  })
-});
+// Note: This demo uses Relay Proxy Mode (shown above) for Node.js
+// For daemon mode with direct Redis access (like the PHP app), you would use:
+// const RedisFeatureStore = require('launchdarkly-node-server-sdk/integrations').Redis;
+// const client = LD.init(sdkKey, {
+//   featureStore: RedisFeatureStore({
+//     redisOpts: { host: 'redis', port: 6379 },
+//     prefix: 'ld-flags',
+//     cacheTTL: 30
+//   })
+// });
 ```
 
 **Automatic Configuration**: The relay proxy automatically discovers and caches all environments configured via the `AUTO_CONFIG_KEY`, storing each environment's data separately in Redis with environment-specific prefixes.
@@ -629,8 +630,8 @@ The PHP application demonstrates daemon mode by reading feature flags from the s
 
 **Data Flow**:
 1. Relay Proxy fetches flags from LaunchDarkly and stores in Redis
-2. Node.js app connects to Relay Proxy (which uses Redis as cache)
-3. PHP app reads flags directly from Redis (no Relay Proxy connection)
+2. Node.js app connects to Relay Proxy via HTTP (Relay Proxy Mode)
+3. PHP app reads flags directly from Redis (Daemon Mode)
 
 ### Accessing the PHP Application
 
@@ -680,28 +681,28 @@ docker-compose logs php | grep -i "launchdarkly"
 docker-compose start relay-proxy
 ```
 
-### Shared Redis Architecture
+### Redis Architecture
 
-Both the Node.js and PHP applications share the same Redis instance for feature flag data:
+The Relay Proxy and PHP application share the same Redis instance for feature flag data:
 
 **Redis Key Structure**:
 - Keys follow pattern: `ld-flags-{environment-id}:{data-type}`
 - Example: `ld-flags-507f1f77bcf86cd799439011:features`
-- Both SDKs use the same key prefix for the target environment
+- The Relay Proxy and PHP SDK use the same key prefix for the target environment
 
-**Benefits of Shared Architecture**:
-- **Consistency**: Both apps always see the same flag values
+**Benefits of This Architecture**:
+- **Consistency**: Relay Proxy and PHP app always see the same flag values
 - **Efficiency**: Single source of truth reduces API calls
-- **Scalability**: Add more applications without increasing LaunchDarkly API load
-- **Multi-language**: Demonstrates SDK interoperability across languages
+- **Scalability**: Add more daemon-mode applications without increasing LaunchDarkly API load
+- **Multi-language**: Demonstrates different SDK modes (Relay Proxy vs Daemon)
 
 **How It Works**:
 1. Relay Proxy populates Redis with flag data for all configured environments
-2. Node.js SDK connects to Relay Proxy, which reads from Redis
-3. PHP SDK reads directly from Redis using the same key prefix
-4. Both applications evaluate flags using the same underlying data
+2. Node.js SDK connects to Relay Proxy via HTTP (Relay Proxy Mode - no direct Redis access)
+3. PHP SDK reads directly from Redis using the same key prefix (Daemon Mode)
+4. Relay Proxy uses Redis as its cache, PHP reads from that same cache
 5. When flags change in LaunchDarkly, Relay Proxy updates Redis
-6. Both applications see the updated values (Node.js immediately, PHP on next evaluation)
+6. PHP sees the updated values on next evaluation, Node.js gets updates via Relay Proxy
 
 ### Testing Multi-Language Consistency
 
