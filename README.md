@@ -141,6 +141,31 @@ The application uses Server-Sent Events (SSE) to push flag changes instantly:
 - Automatic reconnection on connection loss
 - Detailed logging of flag changes in console
 
+**SSE Connection Behavior:**
+
+The dashboard maintains persistent SSE connections to both Node.js and PHP services for real-time flag updates. To prevent resource exhaustion and ensure system stability:
+
+- **Connection Timeout**: PHP SSE connections automatically close after 5 minutes
+- **Automatic Reconnection**: The dashboard seamlessly reconnects when a connection closes
+- **Heartbeat Monitoring**: Connections send heartbeats every 15 seconds to detect disconnects
+- **Why This Matters**: Prevents PHP-FPM worker exhaustion and memory leaks from indefinite connections
+
+**What You'll See:**
+- Every 5 minutes, the PHP connection will show "Connection timeout - please refresh"
+- The dashboard automatically reconnects within seconds
+- This is **expected behavior** and ensures long-term stability
+- Node.js connections remain open indefinitely (handled differently by Node.js runtime)
+
+**Connection Lifecycle:**
+1. Initial connection established
+2. Flag value sent immediately
+3. Heartbeats sent every 15 seconds
+4. After 5 minutes, PHP connection closes gracefully
+5. Dashboard reconnects automatically
+6. Process repeats
+
+This design ensures the demo can run for extended periods without manual intervention or resource issues.
+
 ### Container Logs
 
 View real-time logs from containers:
@@ -798,6 +823,41 @@ launchdarkly-relay-proxy-enterprise-demo/
 ```
 
 ## Troubleshooting
+
+### SSE Connection Timeouts (Expected Behavior)
+
+**Symptom**: Dashboard shows "Connection timeout - please refresh" for PHP service every 5 minutes, then automatically reconnects
+
+**This is Expected Behavior**: PHP SSE connections are designed to close after 5 minutes to prevent resource exhaustion.
+
+**Why This Happens**:
+- PHP-FPM workers have limited capacity (20 max workers)
+- Long-running connections can exhaust available workers
+- 5-minute timeout prevents memory leaks and worker exhaustion
+- Dashboard automatically reconnects seamlessly
+
+**What's Normal**:
+- PHP connection closes every 5 minutes with timeout message
+- Dashboard reconnects within 1-2 seconds automatically
+- Flag values continue to update correctly
+- No manual intervention required
+
+**When to Worry**:
+- If reconnection fails repeatedly (check PHP container health)
+- If timeout happens much faster than 5 minutes (check PHP-FPM logs)
+- If connection never establishes (check api-service and PHP container)
+
+**To Verify It's Working Correctly**:
+```bash
+# Check PHP container is healthy
+docker-compose ps php
+
+# View PHP logs (should show SSE connections opening/closing)
+docker logs php-app-dev --tail 50
+
+# Check for PHP-FPM worker exhaustion (should see ~5-8 workers, not 20)
+docker exec php-app-dev ps aux | grep "php-fpm: pool www" | wc -l
+```
 
 ### Redis Connection Issues
 
