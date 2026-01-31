@@ -602,18 +602,13 @@
           </div>
         </div>
         
-        <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; font-size: 13px; color: #666;">
-          <strong>About</strong>
-          <p style="margin: 10px 0 0 0;">Redis stores feature flag data for the PHP SDK (daemon mode) and the Relay Proxy, enabling fast flag evaluations.</p>
-        </div>
-        
-        <div style="margin-top: 20px;">
-          <div style="font-size: 13px; color: #666; margin-bottom: 10px;">
-            <strong>Used By:</strong>
+        <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+          <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">Redis Data Store</h4>
+          <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
+            Raw flag configurations stored in Redis (context-independent)
           </div>
-          <div style="font-size: 12px; color: #999;">
-            • PHP SDK (Daemon Mode)<br>
-            • Relay Proxy (Cache)
+          <div id="redis-data-store" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 517px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+            <div style="color: #999; font-style: italic;">Waiting for Redis to initialize...</div>
           </div>
         </div>
       </div>
@@ -1779,6 +1774,170 @@
       }
       
       // Poll Redis status
+      // Fetch and display Redis data store
+      async function fetchRedisDataStore() {
+        const dataStoreElement = document.getElementById('redis-data-store');
+        
+        if (!dataStoreElement) {
+          console.error('Redis data store element not found');
+          return;
+        }
+        
+        // Show loading state
+        dataStoreElement.innerHTML = '<div style="color: #999; font-style: italic;">Loading...</div>';
+        
+        try {
+          const response = await fetch('http://localhost:4000/api/redis/data-store', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          const data = await response.json();
+          
+          if (!response.ok || !data.success) {
+            const errorMsg = data.error || `HTTP ${response.status}`;
+            dataStoreElement.innerHTML = `<div style="color: #f44336;">Error: ${errorMsg}</div>`;
+            return;
+          }
+          
+          if (data.flags) {
+            const flags = data.flags;
+            const flagKeys = Object.keys(flags);
+            
+            let html = '';
+            
+            if (flagKeys.length === 0) {
+              html += '<div style="color: #999; font-style: italic;">No flags in Redis</div>';
+            } else {
+              html += '<div style="font-family: monospace;">';
+              flagKeys.forEach(key => {
+                const flagValue = flags[key];
+                
+                const isComplexConfig = flagValue && typeof flagValue === 'object' && flagValue.version !== undefined;
+                
+                html += `<div style="margin-bottom: 12px; padding: 8px; background-color: white; border-radius: 3px; border: 1px solid #e0e0e0;">`;
+                html += `<div style="margin-bottom: 4px;"><strong style="color: #405BFF;">${escapeHtml(key)}</strong></div>`;
+                
+                if (isComplexConfig) {
+                  html += `<div style="font-size: 11px; color: #666; line-height: 1.8;">`;
+                  html += `<div>Version: <span style="color: #333;">${flagValue.version || 'N/A'}</span></div>`;
+                  html += `<div>Enabled: <span style="color: #333;">${flagValue.on ? 'Yes' : 'No'}</span></div>`;
+                  
+                  if (flagValue.variations && flagValue.variations.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Variations (${flagValue.variations.length}):</strong></div>`;
+                    flagValue.variations.forEach((variation, index) => {
+                      const varValue = typeof variation === 'object' ? JSON.stringify(variation) : variation;
+                      html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                      html += `[${index}]: <span style="color: #405BFF; font-weight: 500;">${escapeHtml(varValue)}</span>`;
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  if (flagValue.fallthrough) {
+                    if (flagValue.fallthrough.variation !== undefined) {
+                      html += `<div style="margin-top: 6px;">Default (fallthrough): <span style="color: #333;">variation ${flagValue.fallthrough.variation}</span></div>`;
+                    } else if (flagValue.fallthrough.rollout) {
+                      html += `<div style="margin-top: 6px;"><strong>Default (rollout):</strong></div>`;
+                      const rollout = flagValue.fallthrough.rollout;
+                      if (rollout.variations) {
+                        rollout.variations.forEach((rv) => {
+                          const percentage = (rv.weight / 1000).toFixed(1);
+                          html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                          html += `Variation ${rv.variation}: ${percentage}%`;
+                          html += `</div>`;
+                        });
+                      }
+                    }
+                  }
+                  
+                  if (flagValue.offVariation !== undefined) {
+                    html += `<div>Off variation: <span style="color: #333;">variation ${flagValue.offVariation}</span></div>`;
+                  }
+                  
+                  if (flagValue.rules && flagValue.rules.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Rules (${flagValue.rules.length}):</strong></div>`;
+                    flagValue.rules.forEach((rule, index) => {
+                      html += `<div style="margin-left: 12px; font-size: 10px; margin-bottom: 4px;">`;
+                      html += `<strong>Rule ${index + 1}:</strong>`;
+                      
+                      if (rule.variation !== undefined) {
+                        html += ` → Variation ${rule.variation}`;
+                      } else if (rule.rollout) {
+                        html += ` → Rollout`;
+                      }
+                      
+                      if (rule.clauses && rule.clauses.length > 0) {
+                        html += `<div style="margin-left: 12px; margin-top: 2px;">`;
+                        rule.clauses.forEach((clause) => {
+                          const negateText = clause.negate ? 'NOT ' : '';
+                          const attribute = clause.attribute || 'key';
+                          const op = clause.op || 'unknown';
+                          const values = clause.values || [];
+                          
+                          html += `<div style="color: #666;">`;
+                          html += `${negateText}${attribute} ${op} `;
+                          
+                          if (values.length === 1) {
+                            html += `"${escapeHtml(values[0])}"`;
+                          } else if (values.length > 1) {
+                            html += `[${values.map(v => `"${escapeHtml(v)}"`).join(', ')}]`;
+                          }
+                          
+                          html += `</div>`;
+                        });
+                        html += `</div>`;
+                      }
+                      
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  if (flagValue.targets && flagValue.targets.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Targets (${flagValue.targets.length}):</strong></div>`;
+                    flagValue.targets.forEach((target) => {
+                      const userCount = target.values ? target.values.length : 0;
+                      html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                      html += `Variation ${target.variation}: ${userCount} user(s)`;
+                      if (target.values && target.values.length > 0 && target.values.length <= 5) {
+                        html += ` - ${target.values.map(v => escapeHtml(v)).join(', ')}`;
+                      } else if (target.values && target.values.length > 5) {
+                        html += ` - ${target.values.slice(0, 5).map(v => escapeHtml(v)).join(', ')}, ...`;
+                      }
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  if (flagValue.prerequisites && flagValue.prerequisites.length > 0) {
+                    html += `<div style="margin-top: 6px;"><strong>Prerequisites (${flagValue.prerequisites.length}):</strong></div>`;
+                    flagValue.prerequisites.forEach((prereq) => {
+                      html += `<div style="margin-left: 12px; font-size: 10px;">`;
+                      html += `${escapeHtml(prereq.key)} must be variation ${prereq.variation}`;
+                      html += `</div>`;
+                    });
+                  }
+                  
+                  html += `</div>`;
+                } else {
+                  html += `<div style="font-size: 11px; color: #666; line-height: 1.8;">`;
+                  html += `<div>Value: <span style="color: #333; font-weight: 500;">${escapeHtml(JSON.stringify(flagValue))}</span></div>`;
+                  html += `</div>`;
+                }
+                
+                html += `</div>`;
+              });
+              html += '</div>';
+            }
+            
+            dataStoreElement.innerHTML = html;
+          } else {
+            dataStoreElement.innerHTML = '<div style="color: #999; font-style: italic;">No flags found</div>';
+          }
+        } catch (error) {
+          console.error('Error fetching Redis data store:', error);
+          dataStoreElement.innerHTML = `<div style="color: #f44336;">Error: ${error.message}</div>`;
+        }
+      }
+      
       async function pollRedisStatus() {
         try {
           const response = await fetch('http://localhost:4000/api/redis/status');
@@ -1800,6 +1959,12 @@
               if (startButton) startButton.style.display = 'none';
               if (stopButton) stopButton.style.display = 'flex';
               if (restartButton) restartButton.style.display = 'flex';
+              
+              // Fetch and display Redis data store when connected
+              const dataStoreElement = document.getElementById('redis-data-store');
+              if (dataStoreElement && (dataStoreElement.innerHTML.includes('Waiting for Redis') || dataStoreElement.innerHTML.includes('Error'))) {
+                fetchRedisDataStore();
+              }
             } else if (data.running === false) {
               // Redis container exists but is stopped
               updatePillStatus('redis', 'stopped');
@@ -1810,6 +1975,12 @@
               if (startButton) startButton.style.display = 'flex';
               if (stopButton) stopButton.style.display = 'none';
               if (restartButton) restartButton.style.display = 'none';
+              
+              // Show waiting message when stopped
+              const dataStoreElement = document.getElementById('redis-data-store');
+              if (dataStoreElement) {
+                dataStoreElement.innerHTML = '<div style="color: #999; font-style: italic;">Waiting for Redis to initialize...</div>';
+              }
             } else {
               // Redis is not responding
               updatePillStatus('redis', 'disconnected');
@@ -1820,6 +1991,12 @@
               if (startButton) startButton.style.display = 'flex';
               if (stopButton) stopButton.style.display = 'flex';
               if (restartButton) restartButton.style.display = 'flex';
+              
+              // Show error message when disconnected
+              const dataStoreElement = document.getElementById('redis-data-store');
+              if (dataStoreElement) {
+                dataStoreElement.innerHTML = '<div style="color: #f44336;">Redis is not responding</div>';
+              }
             }
           } else {
             updatePillStatus('redis', 'disconnected');
@@ -1830,6 +2007,12 @@
             if (startButton) startButton.style.display = 'flex';
             if (stopButton) stopButton.style.display = 'flex';
             if (restartButton) restartButton.style.display = 'flex';
+            
+            // Show error message
+            const dataStoreElement = document.getElementById('redis-data-store');
+            if (dataStoreElement) {
+              dataStoreElement.innerHTML = '<div style="color: #f44336;">Redis is not responding</div>';
+            }
           }
         } catch (error) {
           const statusIndicator = document.getElementById('redis-status');
@@ -1846,6 +2029,12 @@
           if (startButton) startButton.style.display = 'flex';
           if (stopButton) stopButton.style.display = 'flex';
           if (restartButton) restartButton.style.display = 'flex';
+          
+          // Show error message
+          const dataStoreElement = document.getElementById('redis-data-store');
+          if (dataStoreElement) {
+            dataStoreElement.innerHTML = '<div style="color: #f44336;">Error connecting to Redis</div>';
+          }
         }
       }
       

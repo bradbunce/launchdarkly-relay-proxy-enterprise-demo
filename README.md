@@ -141,15 +141,24 @@ Each service panel includes an "SDK Data Store" section that displays the raw fl
 - **Auto-Refresh**: Automatically updates when flags change in LaunchDarkly
 - **Real-Time Updates**: SSE keeps the display current without manual interaction
 
-**Node.js vs PHP:**
+**Data Sources by Service:**
 - **Node.js**: Shows data from the SDK's in-memory feature store (Proxy Mode)
 - **PHP**: Shows data from the Redis data store (Daemon Mode)
+- **Redis**: Shows raw flag data stored in Redis by the Relay Proxy
+
+**Redis Panel:**
+The Redis panel includes a dedicated "Redis Data Store" display that shows the raw flag configurations stored in Redis by the Relay Proxy. This provides visibility into:
+- The shared data store used by the PHP SDK in daemon mode
+- The cache used by the Relay Proxy for all environments
+- The same flag data that multiple applications can read from
+- Real-time updates as the Relay Proxy refreshes flag data from LaunchDarkly
 
 This feature is useful for:
 - Understanding how flags are structured internally
 - Debugging targeting rules and rollouts
 - Verifying flag configurations are cached correctly
 - Learning how LaunchDarkly stores flag data
+- Monitoring the shared Redis data store used by multiple services
 
 ### User Context Management
 

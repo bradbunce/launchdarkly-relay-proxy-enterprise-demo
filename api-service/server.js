@@ -269,6 +269,73 @@ app.post('/api/redis/restart', async (req, res) => {
   }
 });
 
+// Redis data store endpoint - fetch all LaunchDarkly flags from Redis
+app.post('/api/redis/data-store', async (req, res) => {
+  try {
+    // First check if Redis is running
+    const { stdout: pingOutput } = await execPromise('docker exec redis redis-cli ping 2>&1');
+    if (pingOutput.trim() !== 'PONG') {
+      return res.status(500).json({
+        success: false,
+        error: 'Redis is not responding'
+      });
+    }
+    
+    // Get all LaunchDarkly feature flag keys
+    const { stdout: keysOutput } = await execPromise('docker exec redis redis-cli --scan --pattern "ld-flags-*:features"');
+    const keys = keysOutput.trim().split('\n').filter(k => k.trim());
+    
+    if (keys.length === 0) {
+      return res.json({
+        success: true,
+        flags: {},
+        message: 'No flags found in Redis'
+      });
+    }
+    
+    // For each key, get the hash values (LaunchDarkly stores flags as Redis hashes)
+    const flags = {};
+    
+    for (const key of keys) {
+      try {
+        // Use HGETALL to get all fields from the hash
+        const { stdout: hashOutput } = await execPromise(`docker exec redis redis-cli HGETALL "${key}"`);
+        const lines = hashOutput.trim().split('\n');
+        
+        // Parse hash output (alternating field/value pairs)
+        for (let i = 0; i < lines.length; i += 2) {
+          const flagKey = lines[i];
+          const flagValue = lines[i + 1];
+          
+          if (flagKey && flagValue) {
+            try {
+              flags[flagKey] = JSON.parse(flagValue);
+            } catch (error) {
+              console.error(`Error parsing flag ${flagKey}:`, error.message);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`Error fetching hash from key ${key}:`, error.message);
+      }
+    }
+    
+    res.json({
+      success: true,
+      flags: flags,
+      keyCount: keys.length
+    });
+  } catch (error) {
+    logError('/api/redis/data-store', error, {
+      command: 'docker exec redis redis-cli'
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Relay Proxy start endpoint
 app.post('/api/relay-proxy/start', async (req, res) => {
   try {
