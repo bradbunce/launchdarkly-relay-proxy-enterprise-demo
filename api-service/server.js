@@ -341,6 +341,7 @@ app.post('/api/redis/data-store', async (req, res) => {
 // the flag data it's serving, demonstrating consistency across all layers
 let relayProxyCacheClient = null;
 let relayProxyCacheData = null;
+let relayProxyCacheClients = []; // SSE clients listening for cache updates
 
 // Initialize a dedicated SDK client for inspecting Relay Proxy cache
 async function initRelayProxyCacheClient() {
@@ -381,6 +382,9 @@ async function initRelayProxyCacheClient() {
       this.isInitialized = true;
       relayProxyCacheData = { ...this.data };
       
+      // Broadcast initial data to all connected SSE clients
+      broadcastCacheUpdate();
+      
       if (cb) cb();
       return Promise.resolve();
     }
@@ -403,6 +407,10 @@ async function initRelayProxyCacheClient() {
       const collection = kind === 'features' ? this.data.flags : this.data.segments;
       collection[item.key] = item;
       relayProxyCacheData = { ...this.data };
+      
+      // Broadcast update to all connected SSE clients
+      broadcastCacheUpdate();
+      
       if (cb) cb();
       return Promise.resolve();
     }
@@ -439,6 +447,31 @@ async function initRelayProxyCacheClient() {
   return relayProxyCacheClient;
 }
 
+// Broadcast cache updates to all connected SSE clients
+function broadcastCacheUpdate() {
+  if (!relayProxyCacheData || relayProxyCacheClients.length === 0) {
+    return;
+  }
+  
+  const data = JSON.stringify({
+    flags: relayProxyCacheData.flags,
+    timestamp: Date.now()
+  });
+  
+  console.log(`[Relay Proxy Cache] Broadcasting update to ${relayProxyCacheClients.length} clients`);
+  
+  // Send to all connected clients
+  relayProxyCacheClients = relayProxyCacheClients.filter(client => {
+    try {
+      client.write(`data: ${data}\n\n`);
+      return true;
+    } catch (error) {
+      console.log('[Relay Proxy Cache] Client disconnected');
+      return false;
+    }
+  });
+}
+
 app.post('/api/relay-proxy/cache', async (req, res) => {
   try {
     // Initialize the client if not already done
@@ -468,6 +501,48 @@ app.post('/api/relay-proxy/cache', async (req, res) => {
       success: false,
       error: error.message
     });
+  }
+});
+
+// Relay Proxy cache SSE stream endpoint
+app.get('/api/relay-proxy/cache/stream', async (req, res) => {
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  
+  try {
+    // Initialize the client if not already done
+    if (!relayProxyCacheClient) {
+      await initRelayProxyCacheClient();
+    }
+    
+    // Add this client to the broadcast list
+    relayProxyCacheClients.push(res);
+    console.log(`[Relay Proxy Cache] SSE client connected (${relayProxyCacheClients.length} total)`);
+    
+    // Send initial data immediately
+    if (relayProxyCacheData && relayProxyCacheData.flags) {
+      const data = JSON.stringify({
+        flags: relayProxyCacheData.flags,
+        timestamp: Date.now()
+      });
+      res.write(`data: ${data}\n\n`);
+    }
+    
+    // Handle client disconnect
+    req.on('close', () => {
+      relayProxyCacheClients = relayProxyCacheClients.filter(client => client !== res);
+      console.log(`[Relay Proxy Cache] SSE client disconnected (${relayProxyCacheClients.length} remaining)`);
+    });
+    
+  } catch (error) {
+    logError('/api/relay-proxy/cache/stream', error, {
+      message: 'Failed to initialize Relay Proxy cache stream'
+    });
+    res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    res.end();
   }
 });
 
