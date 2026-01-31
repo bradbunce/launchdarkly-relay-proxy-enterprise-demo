@@ -18,6 +18,31 @@ require_once __DIR__ . '/vendor/autoload.php';
 use LaunchDarkly\LDClient;
 use LaunchDarkly\Integrations\Redis;
 
+// In-memory context store to share context between POST endpoint and SSE connections
+// This is stored in a file since PHP doesn't have persistent memory between requests
+$contextStoreFile = '/tmp/php-context-store.json';
+
+function getContextStore() {
+    global $contextStoreFile;
+    if (file_exists($contextStoreFile)) {
+        $data = file_get_contents($contextStoreFile);
+        return json_decode($data, true) ?: [];
+    }
+    return [];
+}
+
+function setContextInStore($key, $context) {
+    global $contextStoreFile;
+    $store = getContextStore();
+    $store[$key] = $context;
+    file_put_contents($contextStoreFile, json_encode($store));
+}
+
+function getContextFromStore($key) {
+    $store = getContextStore();
+    return $store[$key] ?? null;
+}
+
 // Store current context for PHP service (dashboard)
 session_start();
 if (!isset($_SESSION['php_service_context'])) {
@@ -26,6 +51,9 @@ if (!isset($_SESSION['php_service_context'])) {
         'key' => 'php-anon-' . uniqid(),
         'anonymous' => true
     ];
+    
+    // Also add to in-memory store
+    setContextInStore($_SESSION['php_service_context']['key'], $_SESSION['php_service_context']);
 }
 
 // Log file for streaming to UI
@@ -95,26 +123,58 @@ function getLDClient() {
     }
 }
 
-// Helper function to build context from session
-function buildContextFromSession() {
-    $contextData = $_SESSION['php_service_context'];
+// Helper function to build context from session or store
+function buildContextFromSession($contextKeyFromUrl = null) {
+    // Try to get context from in-memory store first (using context key from URL)
+    if ($contextKeyFromUrl) {
+        $contextData = getContextFromStore($contextKeyFromUrl);
+        if ($contextData) {
+            log_message('[buildContextFromSession] Using context from in-memory store: ' . $contextKeyFromUrl);
+        } else {
+            log_message('[buildContextFromSession] Context key from URL not found in store: ' . $contextKeyFromUrl);
+            // Fall back to session
+            $contextData = $_SESSION['php_service_context'];
+            log_message('[buildContextFromSession] Using context from session');
+        }
+    } else {
+        // Use session context
+        $contextData = $_SESSION['php_service_context'];
+        log_message('[buildContextFromSession] Using context from session (no URL key provided)');
+    }
+    
+    log_message('[buildContextFromSession] Context data: ' . json_encode($contextData));
+    
     $contextBuilder = \LaunchDarkly\LDContext::builder($contextData['key']);
     $contextBuilder->kind('user');
     
     if (isset($contextData['name'])) {
         $contextBuilder->name($contextData['name']);
+        log_message('[buildContextFromSession] Added name: ' . $contextData['name']);
     }
     if (isset($contextData['email'])) {
         $contextBuilder->set('email', $contextData['email']);
+        log_message('[buildContextFromSession] Added email: ' . $contextData['email']);
     }
     if (isset($contextData['location'])) {
         $contextBuilder->set('location', $contextData['location']);
+        log_message('[buildContextFromSession] Added location: ' . $contextData['location']);
+    } else {
+        log_message('[buildContextFromSession] NO LOCATION in context!');
     }
     if (isset($contextData['anonymous'])) {
         $contextBuilder->set('anonymous', $contextData['anonymous']);
     }
     
-    return $contextBuilder->build();
+    $context = $contextBuilder->build();
+    log_message('[buildContextFromSession] Final context: ' . json_encode([
+        'key' => $context->getKey(),
+        'name' => $context->getName(),
+        'email' => $contextData['email'] ?? null,
+        'location' => $contextData['location'] ?? null,
+        'anonymous' => $contextData['anonymous'] ?? false
+    ]));
+    
+    return $context;
 }
 
 // Initialize the global client once when the script loads
@@ -161,6 +221,12 @@ if ($requestUri === '/api/context' && $requestMethod === 'POST') {
             $_SESSION['php_service_context']['location'] = $input['location'];
         }
     }
+    
+    // Store context in in-memory store so SSE connections can access it
+    $contextKey = $_SESSION['php_service_context']['key'];
+    setContextInStore($contextKey, $_SESSION['php_service_context']);
+    log_message('[Context Store] Saved context for key: ' . $contextKey);
+    log_message('[Context Store] Context data: ' . json_encode($_SESSION['php_service_context']));
     
     // Trigger a flag evaluation to store the new context in Redis (daemon mode)
     try {
@@ -247,7 +313,7 @@ if ($requestUri === '/api/status' && $requestMethod === 'GET') {
     
     echo json_encode([
         'connected' => $connected,
-        'mode' => 'Daemon Mode (Redis + Events)',
+        'mode' => 'Daemon Mode',
         'sdkVersion' => 'PHP SDK',
         'sdkInitialized' => $sdkConnected,
         'redisConnected' => $redisConnected,
@@ -565,10 +631,13 @@ if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
     log_message("PHP SDK: Context key from URL: " . ($contextKeyFromUrl ?? 'none'));
     log_message("PHP SDK: Session context key: " . $_SESSION['php_service_context']['key']);
     
-    // Use context key from URL if provided
-    if ($contextKeyFromUrl && $contextKeyFromUrl !== $_SESSION['php_service_context']['key']) {
-        log_message("PHP SDK: Using context key from URL instead of session");
-        $_SESSION['php_service_context']['key'] = $contextKeyFromUrl;
+    // Check if context exists in store
+    if ($contextKeyFromUrl) {
+        $contextFromStore = getContextFromStore($contextKeyFromUrl);
+        log_message("PHP SDK: Context in store: " . ($contextFromStore ? 'yes' : 'no'));
+        if ($contextFromStore) {
+            log_message("PHP SDK: Context from store: " . json_encode($contextFromStore));
+        }
     }
     
     // Make PHP responsive to client disconnects
@@ -623,8 +692,8 @@ if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
         // Log initialization time
         log_message("PHP SDK: Client initialized in " . round($initTime * 1000, 2) . "ms");
         
-        // Build context from session using helper function
-        $context = buildContextFromSession();
+        // Build context from session or store using helper function
+        $context = buildContextFromSession($contextKeyFromUrl);
         
         // Wait a moment for Redis to be populated by Relay Proxy (max 2 seconds)
         // This ensures we don't return fallback on initial load
@@ -779,7 +848,7 @@ $relayProxyUrl = getenv('RELAY_PROXY_URL') ?: 'http://relay-proxy:8030';
 $flagValue = 'Hello from PHP (Fallback - SDK not initialized)';
 $errorMessage = null;
 $sdkInitialized = false;
-$sdkMode = 'Daemon Mode (Redis + Events)';
+$sdkMode = 'Daemon Mode';
 $usingFeatureRequester = true;
 
 try {
@@ -795,8 +864,8 @@ try {
     $redisClient->ping();
     log_message("PHP SDK: Redis connection successful");
 
-    // Initialize SDK in Daemon Mode (Redis + Events)
-    log_message("PHP SDK: Initializing in Daemon Mode (Redis + Events)");
+    // Initialize SDK in Daemon Mode
+    log_message("PHP SDK: Initializing in Daemon Mode");
     
     $options = $redisPrefix ? ['prefix' => $redisPrefix] : [];
     $featureStore = Redis::featureRequester($redisClient, $options);
@@ -811,7 +880,7 @@ try {
         'flush_interval' => 1
     ]);
     
-    log_message("PHP SDK: LaunchDarkly client initialized in Daemon Mode (Redis + Events)");
+    log_message("PHP SDK: LaunchDarkly client initialized in Daemon Mode");
 
     $sdkInitialized = true;
 
