@@ -597,12 +597,12 @@
           </button>
         </div>
         
-        <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; display: flex; flex-direction: column; flex: 1; min-height: 0;">
+        <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
           <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">Relay Proxy Cache</h4>
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Internal Go SDK cache served to downstream clients
           </div>
-          <div id="relay-proxy-cache" style="font-size: 12px; line-height: 1.6; color: #555; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; flex: 1; min-height: 400px; max-height: 2000px;">
+          <div id="relay-proxy-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 400px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
             <div style="color: #999; font-style: italic;">Waiting for Relay Proxy to initialize...</div>
           </div>
         </div>
@@ -636,12 +636,12 @@
           </div>
         </div>
         
-        <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; display: flex; flex-direction: column; flex: 1; min-height: 0;">
+        <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
           <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">Redis Data Store</h4>
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Raw flag configurations stored in Redis (context-independent)
           </div>
-          <div id="redis-data-store" style="font-size: 12px; line-height: 1.6; color: #555; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; flex: 1; min-height: 517px; max-height: 2000px;">
+          <div id="redis-data-store" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 517px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
             <div style="color: #999; font-style: italic;">Waiting for Redis to initialize...</div>
           </div>
         </div>
