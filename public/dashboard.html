@@ -2217,6 +2217,9 @@
         console.log('[renderRedisDataStore] Render complete');
       }
       
+      // Make renderRedisDataStore globally accessible for pollRedisStatus()
+      window.renderRedisDataStore = renderRedisDataStore;
+      
       // Render PHP SDK cache (reuses same logic as Relay Proxy)
       function renderPHPSDKCache(flags) {
         console.log('[renderPHPSDKCache] Called with', Object.keys(flags).length, 'flags');
@@ -2498,6 +2501,9 @@
         }
       }
       
+      // Track Redis connection state for detecting transitions
+      let wasRedisConnected = false;
+      
       async function pollRedisStatus() {
         try {
           const response = await fetch('http://localhost:4000/api/redis/status');
@@ -2509,7 +2515,9 @@
           
           if (response.ok) {
             const data = await response.json();
-            if (data.connected && data.running) {
+            const isConnected = data.connected && data.running;
+            
+            if (isConnected) {
               // Redis is running
               updatePillStatus('redis', 'connected');
               statusText.textContent = 'Running';
@@ -2520,8 +2528,30 @@
               if (stopButton) stopButton.style.display = 'flex';
               if (restartButton) restartButton.style.display = 'flex';
               
-              // Redis data store is now updated via SSE from Relay Proxy cache
-              // No need to fetch here anymore
+              // If Redis just came back online, manually fetch the data store
+              if (!wasRedisConnected && isConnected) {
+                console.log('[Redis] Service reconnected, fetching data store manually');
+                const dataStoreElement = document.getElementById('redis-data-store');
+                if (dataStoreElement && 
+                    (dataStoreElement.innerHTML.includes('Waiting for Redis') || 
+                     dataStoreElement.innerHTML.includes('not responding'))) {
+                  // Fetch from Relay Proxy cache endpoint
+                  try {
+                    const cacheResponse = await fetch('http://localhost:4000/api/relay-proxy/cache');
+                    if (cacheResponse.ok) {
+                      const cacheData = await cacheResponse.json();
+                      if (cacheData.flags) {
+                        console.log('[Redis] Data store fetched successfully:', Object.keys(cacheData.flags).length, 'flags');
+                        window.renderRedisDataStore(cacheData.flags);
+                      }
+                    }
+                  } catch (error) {
+                    console.error('[Redis] Error fetching data store:', error);
+                  }
+                }
+              }
+              
+              wasRedisConnected = true;
             } else if (data.running === false) {
               // Redis container exists but is stopped
               updatePillStatus('redis', 'stopped');
@@ -2538,6 +2568,8 @@
               if (dataStoreElement) {
                 dataStoreElement.innerHTML = '<div style="color: #999; font-style: italic;">Waiting for Redis to initialize...</div>';
               }
+              
+              wasRedisConnected = false;
             } else {
               // Redis is not responding
               updatePillStatus('redis', 'disconnected');
@@ -2554,6 +2586,8 @@
               if (dataStoreElement) {
                 dataStoreElement.innerHTML = '<div style="color: #f44336;">Redis is not responding</div>';
               }
+              
+              wasRedisConnected = false;
             }
           } else {
             updatePillStatus('redis', 'disconnected');
@@ -2570,6 +2604,8 @@
             if (dataStoreElement) {
               dataStoreElement.innerHTML = '<div style="color: #f44336;">Redis is not responding</div>';
             }
+            
+            wasRedisConnected = false;
           }
         } catch (error) {
           const statusIndicator = document.getElementById('redis-status');
@@ -2592,6 +2628,8 @@
           if (dataStoreElement) {
             dataStoreElement.innerHTML = '<div style="color: #f44336;">Error connecting to Redis</div>';
           }
+          
+          wasRedisConnected = false;
         }
       }
       
