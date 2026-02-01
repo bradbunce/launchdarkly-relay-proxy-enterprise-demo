@@ -1180,6 +1180,7 @@
         
         // Track SDK connection status
         this.isConnected = false;
+        this.wasConnected = false; // Track previous connection state
         this.currentContext = { type: 'anonymous' };
         this.reconnectAttempts = 0;
         this.reconnectTimeout = null;
@@ -1446,19 +1447,52 @@
         
         if (!cacheElement) return;
         
+        const previousConnectionState = this.wasConnected;
+        this.wasConnected = this.isConnected;
+        
         if (this.isConnected) {
           // SDK is connected - fetch and display cache
-          // BUT: PHP cache is now updated via Relay Proxy SSE, so skip for PHP
-          if (this.serviceId !== 'php' && 
-              cacheElement && 
-              (cacheElement.innerHTML.includes('SDK must be initialized') || cacheElement.innerHTML.includes('Waiting for SDK'))) {
-            this.fetchAndDisplayCache();
+          if (this.serviceId === 'php') {
+            // For PHP, manually fetch cache when transitioning from disconnected to connected
+            if (!previousConnectionState && this.isConnected && 
+                (cacheElement.innerHTML.includes('SDK must be initialized') || 
+                 cacheElement.innerHTML.includes('Waiting for SDK'))) {
+              console.log('[PHP] Service reconnected, fetching cache manually');
+              this.fetchPHPCache();
+            }
+          } else {
+            // For Node.js, fetch cache if showing error message
+            if (cacheElement && 
+                (cacheElement.innerHTML.includes('SDK must be initialized') || 
+                 cacheElement.innerHTML.includes('Waiting for SDK'))) {
+              this.fetchAndDisplayCache();
+            }
           }
         } else {
           // SDK not connected - show message
           if (cacheElement && !cacheElement.innerHTML.includes('Waiting for SDK')) {
             cacheElement.innerHTML = '<div style="color: #999; font-style: italic;">SDK must be initialized to view cache</div>';
           }
+        }
+      }
+      
+      // Fetch PHP cache from Redis via API
+      async fetchPHPCache() {
+        try {
+          const response = await fetch('http://localhost:4000/api/php/redis-cache', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.flags) {
+              console.log('[PHP] Cache fetched successfully:', Object.keys(data.flags).length, 'flags');
+              renderPHPSDKCache(data.flags);
+            }
+          }
+        } catch (error) {
+          console.error('[PHP] Error fetching cache:', error);
         }
       }
       
