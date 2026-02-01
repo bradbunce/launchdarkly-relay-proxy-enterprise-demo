@@ -2246,6 +2246,9 @@
         console.log('[renderPHPSDKCache] Render complete');
       }
       
+      // Make renderPHPSDKCache globally accessible for ServicePanel.fetchPHPCache()
+      window.renderPHPSDKCache = renderPHPSDKCache;
+      
       // Shared function to render flag list (DRY principle)
       function renderFlagList(flags) {
         const flagKeys = Object.keys(flags);
