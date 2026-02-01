@@ -2535,9 +2535,12 @@
                 if (dataStoreElement && 
                     (dataStoreElement.innerHTML.includes('Waiting for Redis') || 
                      dataStoreElement.innerHTML.includes('not responding'))) {
-                  // Fetch from Relay Proxy cache endpoint
+                  // Fetch from Relay Proxy cache endpoint (POST method)
                   try {
-                    const cacheResponse = await fetch('http://localhost:4000/api/relay-proxy/cache');
+                    const cacheResponse = await fetch('http://localhost:4000/api/relay-proxy/cache', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' }
+                    });
                     if (cacheResponse.ok) {
                       const cacheData = await cacheResponse.json();
                       if (cacheData.flags) {
