@@ -125,7 +125,48 @@ Or to recreate specific containers:
 docker-compose up -d --force-recreate app php
 ```
 
-### 5. Stop the Application
+### 5. Updating to Latest Version
+
+When pulling updates from the repository, rebuild containers to ensure you have the latest code:
+
+```bash
+# Pull latest changes from repository
+git pull
+
+# Stop all containers
+docker-compose down
+
+# Rebuild all containers with latest code (no cache)
+docker-compose build --no-cache
+
+# Start containers with fresh builds
+docker-compose up -d
+```
+
+**Why `--no-cache` is important**: Docker aggressively caches build layers. Without `--no-cache`, you might get old code even after pulling updates. This is especially important for:
+- Dashboard UI changes (`public/dashboard.html`)
+- Application code changes (`src/`, `php/`)
+- Configuration file updates
+
+**Quick rebuild for specific services**:
+
+```bash
+# Rebuild only dashboard after UI changes
+docker-compose build --no-cache dashboard && docker-compose up -d dashboard
+
+# Rebuild only Node.js app
+docker-compose build --no-cache app && docker-compose up -d app
+
+# Rebuild only PHP app
+docker-compose build --no-cache php && docker-compose up -d php
+```
+
+**Browser cache**: After rebuilding the dashboard, do a hard refresh in your browser:
+- **Mac**: Cmd + Shift + R
+- **Windows/Linux**: Ctrl + Shift + R
+- **Or**: Close the tab completely and open a fresh one
+
+### 6. Stop the Application
 
 ```bash
 docker-compose down
