@@ -1450,13 +1450,19 @@
         const previousConnectionState = this.wasConnected;
         this.wasConnected = this.isConnected;
         
+        console.log(`[${this.serviceId}] updateCacheButtonState: previous=${previousConnectionState}, current=${this.isConnected}`);
+        
         if (this.isConnected) {
           // SDK is connected - fetch and display cache
           if (this.serviceId === 'php') {
             // For PHP, manually fetch cache when transitioning from disconnected to connected
-            if (!previousConnectionState && this.isConnected && 
+            const needsRefresh = !previousConnectionState && this.isConnected && 
                 (cacheElement.innerHTML.includes('SDK must be initialized') || 
-                 cacheElement.innerHTML.includes('Waiting for SDK'))) {
+                 cacheElement.innerHTML.includes('Waiting for SDK'));
+            
+            console.log(`[PHP] needsRefresh=${needsRefresh}, innerHTML includes error=${cacheElement.innerHTML.includes('SDK must be initialized')}`);
+            
+            if (needsRefresh) {
               console.log('[PHP] Service reconnected, fetching cache manually');
               this.fetchPHPCache();
             }
@@ -1471,6 +1477,7 @@
         } else {
           // SDK not connected - show message
           if (cacheElement && !cacheElement.innerHTML.includes('Waiting for SDK')) {
+            console.log(`[${this.serviceId}] Setting disconnected message`);
             cacheElement.innerHTML = '<div style="color: #999; font-style: italic;">SDK must be initialized to view cache</div>';
           }
         }
@@ -1488,7 +1495,7 @@
             const data = await response.json();
             if (data.success && data.flags) {
               console.log('[PHP] Cache fetched successfully:', Object.keys(data.flags).length, 'flags');
-              renderPHPSDKCache(data.flags);
+              window.renderPHPSDKCache(data.flags);
             }
           }
         } catch (error) {
