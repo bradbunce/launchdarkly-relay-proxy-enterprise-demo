@@ -772,18 +772,31 @@ The PHP application demonstrates daemon mode by reading feature flags from the s
 
 ### Accessing the PHP Application
 
-Once the services are running, access the PHP backend API at:
+Once the services are running, the PHP backend API is accessible at:
 
 **URL**: http://localhost:8080
 
-**Note**: The unified dashboard at http://localhost:8000 provides a visual interface for both Node.js and PHP services. The PHP API at port 8080 is primarily for backend operations and testing.
+**Note**: The PHP service is **API-only** and returns JSON responses. For a visual interface, use the unified dashboard at http://localhost:8000 which displays both Node.js and PHP services.
 
-The PHP application displays:
-- Current value of the `user-message` feature flag
-- User context information
-- Daemon mode status indicator
-- Redis connection information
-- Environment details
+**Available Endpoints:**
+- `GET /` - API information and available endpoints
+- `GET /api/status` - SDK and Redis status
+- `GET /api/context` - Get current context
+- `POST /api/context` - Update context
+- `POST /api/test-evaluation` - Test flag evaluation
+- `POST /api/redis-cache` - Get Redis data store
+- `POST /api/load-test` - Run load test
+- `GET /api/message/stream` - SSE stream for flag updates
+- `GET /redis-monitor` - SSE stream for Redis monitor
+
+**Example:**
+```bash
+# Get API information
+curl http://localhost:8080
+
+# Check PHP SDK status
+curl http://localhost:8080/api/status
+```
 
 ### Verifying PHP SDK is Reading from Redis
 
@@ -802,19 +815,24 @@ docker exec redis redis-cli KEYS "*"
 # 4. Check specific flag data in Redis
 docker exec redis redis-cli HGETALL "ld-flags-<environment-id>:features"
 
-# 5. Access PHP app and verify it displays flag value
-curl http://localhost:8080
+# 5. Access PHP API and verify it returns status
+curl http://localhost:8080/api/status
 
-# 6. Stop Relay Proxy to test daemon mode independence
+# 6. Test flag evaluation via API
+curl -X POST http://localhost:8080/api/test-evaluation \
+  -H "Content-Type: application/json" \
+  -d '{"context": {"key": "test-user", "anonymous": false}}'
+
+# 7. Stop Relay Proxy to test daemon mode independence
 docker-compose stop relay-proxy
 
-# 7. Verify PHP app still works (reads from Redis cache)
-curl http://localhost:8080
+# 8. Verify PHP app still works (reads from Redis cache)
+curl http://localhost:8080/api/status
 
-# 8. Check PHP logs show no LaunchDarkly API connection attempts
+# 9. Check PHP logs show no LaunchDarkly API connection attempts
 docker-compose logs php | grep -i "launchdarkly"
 
-# 9. Restart Relay Proxy
+# 10. Restart Relay Proxy
 docker-compose start relay-proxy
 ```
 
@@ -852,11 +870,13 @@ docker-compose up -d
 # 2. Wait for services to initialize (30 seconds)
 sleep 30
 
-# 3. Access Node.js app
-curl http://localhost:3000
+# 3. Test Node.js API endpoint
+curl http://localhost:3000/api/flag
 
-# 4. Access PHP app
-curl http://localhost:8080
+# 4. Test PHP API endpoint
+curl -X POST http://localhost:8080/api/test-evaluation \
+  -H "Content-Type: application/json" \
+  -d '{"context": {"key": "test-user", "anonymous": false}}'
 
 # 5. Compare flag values - they should match
 
@@ -866,8 +886,10 @@ curl http://localhost:8080
 sleep 30
 
 # 8. Verify both apps show the updated value
-curl http://localhost:3000
-curl http://localhost:8080
+curl http://localhost:3000/api/flag
+curl -X POST http://localhost:8080/api/test-evaluation \
+  -H "Content-Type: application/json" \
+  -d '{"context": {"key": "test-user", "anonymous": false}}'
 ```
 
 ## Environment Variables
