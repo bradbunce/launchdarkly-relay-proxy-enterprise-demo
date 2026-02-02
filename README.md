@@ -61,6 +61,8 @@ RELAY_PROXY_CONFIG_KEY=rel-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 Optional configuration:
 ```env
 # Redis prefix (must match your environment ID from LaunchDarkly)
+# Note: The environment ID is the same as your Client-side ID
+# Find it in LaunchDarkly: Account Settings > Projects > [Your Project] > [Environment] > Client-side ID
 REDIS_PREFIX=ld-flags-'your-environment-id'
 ```
 
@@ -735,12 +737,23 @@ environment:
 REDIS_PREFIX=ld-flags-'6969a4b8e5069109d9807840'
 ```
 
-**Finding Your Environment ID**:
+**Finding Your Environment ID (Client-side ID)**:
+
+The environment ID is the same value as your **Client-side ID** in LaunchDarkly.
+
+**Option 1: From LaunchDarkly UI**
+1. Log in to https://app.launchdarkly.com
+2. Navigate to **Account Settings** > **Projects**
+3. Select your project and environment
+4. Copy the **Client-side ID** value
+5. Use it in the format: `REDIS_PREFIX=ld-flags-{client-side-id}`
+
+**Option 2: From Redis**
 ```bash
 # List all Redis keys
 docker exec redis redis-cli KEYS "*"
 
-# Look for keys like: ld-flags-'507f1f77bcf86cd799439011':features
+# Look for keys like: ld-flags-507f1f77bcf86cd799439011:features
 # The environment ID is: 507f1f77bcf86cd799439011
 ```
 
@@ -945,7 +958,7 @@ curl -X POST http://localhost:8080/api/test-evaluation \
 | `RELAY_PROXY_URL` | No | http://relay-proxy:8030 | URL of the Relay Proxy |
 | `REDIS_HOST` | No | redis | Redis hostname (PHP only) |
 | `REDIS_PORT` | No | 6379 | Redis port (PHP only) |
-| `REDIS_PREFIX` | No | - | Redis key prefix (PHP only, must match Relay Proxy environment ID) |
+| `REDIS_PREFIX` | No | - | Redis key prefix (PHP only, must match Relay Proxy environment ID / Client-side ID) |
 
 ### Obtaining LaunchDarkly Credentials
 
