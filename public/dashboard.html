@@ -468,13 +468,13 @@
           </div>
         </div>
         
+        <div class="sdk-config">
+          <strong>SDK Client Mode:</strong> <span id="node-sdk-mode">Proxy Mode</span>
+        </div>
+        
         <div class="flag-display">
           <label>Feature Flag: user-message</label>
           <div class="flag-value" id="node-flag-value">Loading...</div>
-        </div>
-        
-        <div class="sdk-config">
-          <strong>SDK Client Mode:</strong> <span id="node-sdk-mode">Proxy Mode</span>
         </div>
         
         <div class="context-display">
@@ -489,6 +489,18 @@
           <div style="display: flex; gap: 10px; margin-top: 10px;">
             <button id="node-context-button">Change Context</button>
             <button id="node-test-evaluation" class="btn-secondary">Test Flag Evaluation</button>
+          </div>
+        </div>
+        
+        <div class="hash-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="font-size: 13px; color: #333; margin: 0; font-weight: 600;">🔢 Bucketing Hash Values</h4>
+            <a href="#" id="node-hash-toggle" style="font-size: 12px; color: #405BFF; text-decoration: none; cursor: pointer;">Show</a>
+          </div>
+          <div id="node-hash-content" style="display: none;">
+            <div id="node-hash-info" style="font-size: 12px; line-height: 1.8; color: #555; font-family: 'Courier New', monospace; padding: 12px; background-color: #f8f9fa; border-radius: 4px; border-left: 3px solid #405BFF;">
+              <div style="color: #999; font-style: italic;">Waiting for flag evaluation...</div>
+            </div>
           </div>
         </div>
         
@@ -522,13 +534,13 @@
           </div>
         </div>
         
+        <div class="sdk-config">
+          <strong>SDK Client Mode:</strong> <span id="php-sdk-mode">Daemon Mode</span>
+        </div>
+        
         <div class="flag-display">
           <label>Feature Flag: user-message</label>
           <div class="flag-value" id="php-flag-value">Loading...</div>
-        </div>
-        
-        <div class="sdk-config">
-          <strong>SDK Client Mode:</strong> <span id="php-sdk-mode">Daemon Mode</span>
         </div>
         
         <div class="context-display">
@@ -543,6 +555,18 @@
           <div style="display: flex; gap: 10px; margin-top: 10px;">
             <button id="php-edit-context">Change Context</button>
             <button id="php-test-evaluation" class="btn-secondary">Test Flag Evaluation</button>
+          </div>
+        </div>
+        
+        <div class="hash-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="font-size: 13px; color: #333; margin: 0; font-weight: 600;">🔢 Bucketing Hash Values</h4>
+            <a href="#" id="php-hash-toggle" style="font-size: 12px; color: #405BFF; text-decoration: none; cursor: pointer;">Show</a>
+          </div>
+          <div id="php-hash-content" style="display: none;">
+            <div id="php-hash-info" style="font-size: 12px; line-height: 1.8; color: #555; font-family: 'Courier New', monospace; padding: 12px; background-color: #f8f9fa; border-radius: 4px; border-left: 3px solid #405BFF;">
+              <div style="color: #999; font-style: italic;">Waiting for flag evaluation...</div>
+            </div>
           </div>
         </div>
         
@@ -1201,6 +1225,12 @@
           const data = JSON.parse(event.data);
           console.log(`[${this.serviceId}] Parsed message:`, data.message);
           this.updateFlagValue(data.message);
+          
+          // Update hash info if available
+          if (data.hashInfo) {
+            this.updateHashInfo(data.hashInfo);
+          }
+          
           // Reset reconnect attempts on successful message
           this.reconnectAttempts = 0;
         };
@@ -1274,6 +1304,20 @@
             console.log(`[${this.serviceId}] Flag value changed, auto-refreshing cache`);
             this.fetchAndDisplayCache();
           }
+        }
+      }
+      
+      // Update the displayed hash information
+      updateHashInfo(hashInfo) {
+        const hashElement = document.getElementById(`${this.serviceId}-hash-info`);
+        if (hashElement && hashInfo) {
+          let html = '';
+          html += `<div style="margin-bottom: 4px;"><strong>Context Key:</strong> ${this.escapeHtml(this.currentContext.key || 'N/A')}</div>`;
+          html += `<div style="margin-bottom: 4px;"><strong>Salt:</strong> ${this.escapeHtml(hashInfo.salt || 'N/A')}</div>`;
+          html += `<div style="margin-bottom: 4px;"><strong>Hash Value:</strong> <span style="color: #405BFF;">${hashInfo.hashValue}</span></div>`;
+          html += `<div><strong>Bucket Value:</strong> <span style="color: #4caf50; font-weight: 600;">${hashInfo.bucketValue.toFixed(5)}</span></div>`;
+          html += `<div style="margin-top: 6px; font-size: 11px; color: #666; font-style: italic;">Bucket determines which variation the user receives in percentage rollouts</div>`;
+          hashElement.innerHTML = html;
         }
       }
       
@@ -1450,8 +1494,6 @@
         const previousConnectionState = this.wasConnected;
         this.wasConnected = this.isConnected;
         
-        console.log(`[${this.serviceId}] updateCacheButtonState: previous=${previousConnectionState}, current=${this.isConnected}`);
-        
         if (this.isConnected) {
           // SDK is connected - fetch and display cache
           if (this.serviceId === 'php') {
@@ -1460,10 +1502,7 @@
                 (cacheElement.innerHTML.includes('SDK must be initialized') || 
                  cacheElement.innerHTML.includes('Waiting for SDK'));
             
-            console.log(`[PHP] needsRefresh=${needsRefresh}, innerHTML includes error=${cacheElement.innerHTML.includes('SDK must be initialized')}`);
-            
             if (needsRefresh) {
-              console.log('[PHP] Service reconnected, fetching cache manually');
               this.fetchPHPCache();
             }
           } else {
@@ -3322,6 +3361,37 @@
         });
       }
       
+      // Set up hash toggle handlers
+      const nodeHashToggle = document.getElementById('node-hash-toggle');
+      const nodeHashContent = document.getElementById('node-hash-content');
+      if (nodeHashToggle && nodeHashContent) {
+        nodeHashToggle.addEventListener('click', (e) => {
+          e.preventDefault();
+          if (nodeHashContent.style.display === 'none') {
+            nodeHashContent.style.display = 'block';
+            nodeHashToggle.textContent = 'Hide';
+          } else {
+            nodeHashContent.style.display = 'none';
+            nodeHashToggle.textContent = 'Show';
+          }
+        });
+      }
+      
+      const phpHashToggle = document.getElementById('php-hash-toggle');
+      const phpHashContent = document.getElementById('php-hash-content');
+      if (phpHashToggle && phpHashContent) {
+        phpHashToggle.addEventListener('click', (e) => {
+          e.preventDefault();
+          if (phpHashContent.style.display === 'none') {
+            phpHashContent.style.display = 'block';
+            phpHashToggle.textContent = 'Hide';
+          } else {
+            phpHashContent.style.display = 'none';
+            phpHashToggle.textContent = 'Show';
+          }
+        });
+      }
+      
       // PHP Test Evaluation button
       const phpTestButton = document.getElementById('php-test-evaluation');
       if (phpTestButton) {
@@ -3354,6 +3424,11 @@
                 phpFlagElement.textContent = data.flagValue;
               }
               
+              // Update hash info if available
+              if (data.hashInfo) {
+                phpPanel.updateHashInfo(data.hashInfo);
+              }
+              
               // Build context details for alert
               let contextDetails = `- Type: ${data.context.type}\n- Key: ${data.context.key}\n- Anonymous: ${data.context.anonymous}`;
               if (data.context.email) {
@@ -3366,7 +3441,13 @@
                 contextDetails += `\n- Location: ${data.context.location} ✓`;
               }
               
-              alert(`Test Evaluation Complete!\n\nFlag Value: ${data.flagValue}\n\nContext:\n${contextDetails}\n\nCheck the php-app-dev logs for detailed output.`);
+              // Add hash info to alert if available
+              let hashDetails = '';
+              if (data.hashInfo) {
+                hashDetails = `\n\nHash Values:\n- Hash: ${data.hashInfo.hashValue}\n- Bucket: ${data.hashInfo.bucketValue.toFixed(5)}\n- Salt: ${data.hashInfo.salt}`;
+              }
+              
+              alert(`Test Evaluation Complete!\n\nFlag Value: ${data.flagValue}\n\nContext:\n${contextDetails}${hashDetails}\n\nCheck the php-app-dev logs for detailed output.`);
             } else {
               alert(`Test Evaluation Failed:\n${data.error}`);
             }
@@ -3411,6 +3492,11 @@
                 nodeFlagElement.textContent = data.flagValue;
               }
               
+              // Update hash info if available
+              if (data.hashInfo) {
+                nodePanel.updateHashInfo(data.hashInfo);
+              }
+              
               // Build context details for alert
               let contextDetails = `- Type: ${data.context.type}\n- Key: ${data.context.key}\n- Anonymous: ${data.context.anonymous}`;
               if (data.context.email) {
@@ -3423,7 +3509,13 @@
                 contextDetails += `\n- Location: ${data.context.location} ✓`;
               }
               
-              alert(`Test Evaluation Complete!\n\nFlag Value: ${data.flagValue}\n\nContext:\n${contextDetails}\n\nCheck the node-app-dev logs for detailed output.`);
+              // Add hash info to alert if available
+              let hashDetails = '';
+              if (data.hashInfo) {
+                hashDetails = `\n\nHash Values:\n- Hash: ${data.hashInfo.hashValue}\n- Bucket: ${data.hashInfo.bucketValue.toFixed(5)}\n- Salt: ${data.hashInfo.salt}`;
+              }
+              
+              alert(`Test Evaluation Complete!\n\nFlag Value: ${data.flagValue}\n\nContext:\n${contextDetails}${hashDetails}\n\nCheck the node-app-dev logs for detailed output.`);
             } else {
               alert(`Test Evaluation Failed:\n${data.error}`);
             }

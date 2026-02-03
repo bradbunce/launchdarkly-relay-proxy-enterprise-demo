@@ -276,6 +276,100 @@ The application uses specialized context stores to ensure user context (includin
 - Enables targeting rules based on `user.location` attribute
 - Works seamlessly for both Node.js (Proxy Mode) and PHP (Daemon Mode)
 
+### Bucketing Hash Values
+
+Each service panel includes a collapsible "Bucketing Hash Values" section that displays the hash calculation used by LaunchDarkly to determine which variation a user receives in percentage rollouts.
+
+**What You Can See:**
+- **Context Key**: The user identifier used in the hash calculation
+- **Salt**: The unique salt value from the flag configuration
+- **Hash Value**: The raw SHA-1 hash result (first 60 bits as decimal)
+- **Bucket Value**: The normalized value between 0 and 1 used for rollout decisions
+
+**How LaunchDarkly's Bucketing Algorithm Works:**
+
+LaunchDarkly uses a deterministic hashing algorithm to assign users to variations in percentage rollouts:
+
+1. **Hash Input Format**: `{flagKey}.{salt}.{contextKey}`
+   - Example: `user-message.94b881a3be5c449d99dbbe1a92ca3fa0.node-anon-42163483`
+
+2. **Hash Algorithm**: SHA-1 (not MurmurHash3)
+   - Calculates SHA-1 hash of the input string
+   - Extracts first 15 hexadecimal characters (60 bits)
+   - Converts to decimal integer
+
+3. **Bucket Calculation**: Divide by `0xFFFFFFFFFFFFFFF` (2^60 - 1)
+   - Result is a float between 0 and 1
+   - Example: `0.85104` means user is in the 85.104th percentile
+
+4. **Variation Assignment**: Compare bucket value to rollout percentages
+   - Variation 0: 0% - 50% (bucket < 0.5)
+   - Variation 1: 50% - 100% (bucket >= 0.5)
+   - User with bucket `0.85104` receives Variation 1
+
+**Technical Implementation:**
+
+Both Node.js and PHP implementations use identical algorithms to ensure consistency:
+
+**Node.js** (`src/nodejs/src/calculateHashValue.js`):
+```javascript
+import crypto from 'crypto';
+
+// LaunchDarkly's bucketing algorithm
+const hashKey = `${flagKey}.${salt}.${contextKey}`;
+
+// Calculate SHA-1 hash
+const sha1Hash = crypto.createHash('sha1').update(hashKey).digest('hex');
+
+// Extract first 15 hex characters (60 bits)
+const hashPrefix = sha1Hash.substring(0, 15);
+
+// Convert to integer and normalize
+const hashValue = parseInt(hashPrefix, 16);
+const bucketValue = hashValue / 0xFFFFFFFFFFFFFFF;
+```
+
+**PHP** (`src/php/src/CalculateHashValue.php`):
+```php
+// LaunchDarkly's bucketing algorithm
+$hashKey = "{$flagKey}.{$salt}.{$contextKey}";
+
+// Calculate SHA-1 hash
+$sha1Hash = sha1($hashKey);
+
+// Extract first 15 hex characters (60 bits)
+$hashPrefix = substr($sha1Hash, 0, 15);
+
+// Convert using GMP for precise large integer handling
+$hashGmp = gmp_init($hashPrefix, 16);
+$divisorGmp = gmp_init('FFFFFFFFFFFFFFF', 16); // 2^60 - 1
+
+// Calculate bucket value
+$bucketValue = (float)gmp_strval($hashGmp) / (float)gmp_strval($divisorGmp);
+```
+
+**Why This Feature Matters:**
+
+- **Educational**: Understand how LaunchDarkly assigns users to variations
+- **Debugging**: Verify why a specific user receives a particular variation
+- **Consistency**: Confirm both Node.js and PHP return identical values
+- **Transparency**: See the exact calculation behind percentage rollouts
+- **Predictability**: Same context key always gets same bucket value for a flag
+
+**Cross-Platform Consistency:**
+
+The demo verifies that both Node.js and PHP implementations return identical hash and bucket values for the same inputs, demonstrating that LaunchDarkly's bucketing algorithm works consistently across different SDK implementations and languages.
+
+**Example Output:**
+```
+Context Key: node-anon-42163483-4966-4ba0-ac94-6700041f00d3
+Salt: 94b881a3be5c449d99dbbe1a92ca3fa0
+Hash Value: 1001234567890123
+Bucket Value: 0.85104
+```
+
+In this example, the user's bucket value of `0.85104` means they fall into the 85.104th percentile. With a 50/50 rollout, they would receive Variation 1 (the second variation) since their bucket value is >= 0.5.
+
 ### Real-Time Flag Updates
 
 The application uses Server-Sent Events (SSE) to push flag changes instantly:
