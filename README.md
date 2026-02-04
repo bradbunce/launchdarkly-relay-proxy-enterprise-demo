@@ -185,7 +185,166 @@ The demo application provides:
 3. **User Context Selector**: Switch between anonymous and custom user contexts
 4. **Container Logs**: Real-time logs from both app-dev and relay-proxy containers
 5. **Relay Proxy Status**: Detailed status information and performance metrics
-6. **Load Testing**: Built-in load testing tool
+6. **Relay Proxy Connection Toggle**: Simulate network disconnection scenarios
+7. **Load Testing**: Built-in load testing tool
+
+### Relay Proxy Connection Toggle
+
+The dashboard includes a connection toggle that allows you to simulate network disconnection scenarios between the Relay Proxy and LaunchDarkly without stopping the container. This feature is useful for testing how your application behaves when flag updates are unavailable.
+
+**What It Does:**
+- **Disconnect**: Blocks outbound network traffic from the Relay Proxy to LaunchDarkly using iptables rules
+- **Reconnect**: Removes blocking rules to restore connectivity
+- **Status Display**: Shows current connection state (Connected/Disconnected/Container Stopped)
+
+**How to Use:**
+1. Open the dashboard at http://localhost:8000
+2. Locate the "Relay Proxy" panel
+3. Find the "Connection to LaunchDarkly" toggle switch
+4. Click the toggle to disconnect or reconnect
+5. Observe the status text change (Connected → Disconnected)
+
+**What Happens During Disconnection:**
+- Relay Proxy container remains running
+- SDK clients (Node.js and PHP) continue to evaluate flags using cached data from Redis
+- No new flag updates are received from LaunchDarkly
+- Internal Docker network connectivity (Redis access) is preserved
+- Dashboard continues to display cached flag data
+
+**Testing Scenarios:**
+1. **Resilience Testing**: Verify your application continues to function with cached flags
+2. **Daemon Mode vs Proxy Mode**: Compare PHP (daemon mode) and Node.js (proxy mode) behavior during disconnection
+3. **Flag Update Lag**: Disconnect, change flags in LaunchDarkly, reconnect, and observe synchronization
+4. **Cache Validation**: Confirm that Redis cache provides continuity during network issues
+
+**Technical Details:**
+- Uses iptables FORWARD chain rules to block traffic
+- Blocks traffic to LaunchDarkly domains: `clientstream.launchdarkly.com`, `app.launchdarkly.com`, `events.launchdarkly.com`
+- Resolves domains to IP addresses at disconnect time
+- Connection state persists across dashboard refreshes
+- Automatic status polling every 5 seconds
+
+**Limitations:**
+- **IP Address Changes**: If LaunchDarkly changes their IP addresses, you may need to reconnect and disconnect again
+- **DNS Caching**: DNS resolution happens at disconnect time; new IPs won't be blocked until next disconnect
+- **Container Restart**: Restarting the Relay Proxy container automatically clears all blocking rules (returns to connected state)
+- **Requires Root**: API service container must run as root to execute iptables commands (already configured in docker-compose.yml)
+
+**Auto-Configuration and Offline Resilience:**
+
+This demo uses the Relay Proxy's **auto-configuration mode** (`AUTO_CONFIG_KEY`), which provides convenience but has important implications for offline resilience:
+
+**How Auto-Config Works:**
+1. On startup, the Relay Proxy connects to LaunchDarkly to fetch environment configurations
+2. Once configured, it initializes each environment's SDK client
+3. Each SDK client reads from Redis (if available) and streams updates from LaunchDarkly
+4. The Relay Proxy serves flag data to downstream SDK clients
+
+**Critical Limitation - Relay Proxy Restart While Disconnected:**
+
+If the Relay Proxy is **restarted** while disconnected from LaunchDarkly:
+- ❌ The Relay Proxy **cannot initialize** because it needs auto-config from LaunchDarkly
+- ❌ It will continuously retry connecting to LaunchDarkly and remain in a degraded state
+- ❌ SDK clients in **Proxy Mode** (Node.js) cannot evaluate flags because the Relay Proxy isn't serving
+- ✅ SDK clients in **Daemon Mode** (PHP) **can still evaluate flags** by reading directly from Redis
+
+**Why This Happens:**
+- Auto-config mode requires LaunchDarkly connectivity on startup to discover which environments to initialize
+- The Relay Proxy doesn't persist auto-config data to disk for offline restarts
+- Without environment configuration, the Relay Proxy doesn't know which Redis keys to read
+
+**Recommended Usage:**
+- ✅ **Disconnect without restart**: Relay Proxy continues serving from cache and Redis (works perfectly)
+- ❌ **Disconnect + restart**: Relay Proxy cannot initialize (avoid this scenario)
+- ✅ **Production scenario**: Network outages rarely coincide with container restarts
+
+**SDK Mode Comparison During Disconnection:**
+
+| Scenario | Proxy Mode (Node.js) | Daemon Mode (PHP) |
+|----------|---------------------|-------------------|
+| **Disconnected (no restart)** | ✅ Works - serves from Relay Proxy cache | ✅ Works - reads from Redis |
+| **Disconnected + Relay Proxy restart** | ❌ Fails - Relay Proxy can't initialize | ✅ Works - reads from Redis |
+| **Real-time updates** | ✅ Streaming (instant) | ⚠️ Polling (5-30 second delay) |
+| **Latency** | ~10-50ms (network call) | <1ms (local Redis) |
+| **Throughput** | Moderate | Very high (4000+ req/sec) |
+| **Complexity** | Simple (single connection) | Complex (Redis + events) |
+
+**Trade-offs:**
+
+**Proxy Mode (Node.js in this demo):**
+- ✅ Real-time streaming updates (instant flag changes)
+- ✅ Simpler configuration (single endpoint)
+- ✅ No polling overhead
+- ❌ Requires Relay Proxy to be running and initialized
+- ❌ Cannot survive Relay Proxy restart during disconnection
+
+**Daemon Mode (PHP in this demo):**
+- ✅ Maximum resilience (survives Relay Proxy restart)
+- ✅ Highest performance (direct Redis reads)
+- ✅ Works even if Relay Proxy is down
+- ❌ Polling-based updates (5-30 second delay)
+- ❌ More complex configuration (Redis + events)
+- ❌ Requires Redis to be available
+
+**Alternative: Manual Environment Configuration**
+
+For maximum offline resilience, you could use manual environment configuration instead of auto-config:
+- Configure environments explicitly in a config file or environment variables
+- Relay Proxy can initialize offline using the static configuration
+- Both Proxy Mode and Daemon Mode SDKs work after restart
+- Trade-off: Lose the convenience of auto-config (must manually update when adding environments)
+
+**For This Demo:**
+- We use auto-config for ease of setup
+- The disconnect toggle is designed to simulate network issues **without restarting containers**
+- This reflects real-world scenarios where network outages don't typically coincide with service restarts
+- Both SDK modes demonstrate their respective strengths: Node.js shows streaming updates, PHP shows maximum resilience
+
+**Example Workflow:**
+```bash
+# 1. Start all services
+docker-compose up -d
+
+# 2. Open dashboard and verify "Connected" status
+# http://localhost:8000
+
+# 3. Click disconnect toggle
+# Status changes to "Disconnected"
+
+# 4. Verify SDK clients still work (cached flags)
+curl http://localhost:3000/api/flag
+curl http://localhost:8080/api/status
+
+# 5. Change flag value in LaunchDarkly dashboard
+# SDK clients won't see the change (disconnected)
+
+# 6. Click reconnect toggle
+# Status changes to "Connected"
+
+# 7. Wait 30 seconds for Relay Proxy to sync
+sleep 30
+
+# 8. Verify SDK clients now show updated flag value
+curl http://localhost:3000/api/flag
+curl http://localhost:8080/api/status
+```
+
+**API Endpoints:**
+
+The connection toggle uses these API endpoints (also available for programmatic testing):
+
+```bash
+# Disconnect Relay Proxy from LaunchDarkly
+curl -X POST http://localhost:4000/api/relay-proxy/disconnect
+
+# Reconnect Relay Proxy to LaunchDarkly
+curl -X POST http://localhost:4000/api/relay-proxy/reconnect
+
+# Check current connection status
+curl http://localhost:4000/api/relay-proxy/connection-status
+```
+
+For detailed API documentation, see [api-service/README.md](api-service/README.md#relay-proxy-connection-control).
 
 ### SDK Data Store Display
 
@@ -752,6 +911,125 @@ The SDK is configured as a singleton with:
 - Automatic recovery when relay proxy becomes available
 - Event flushing on shutdown
 - Flag change listeners for real-time updates
+
+## Docker Health Checks
+
+This application uses Docker health checks to monitor container health and manage service dependencies. Health checks run automatically in the background and are a normal part of the application's operation.
+
+### What Are Health Checks?
+
+Health checks are periodic tests that Docker runs to verify a container is functioning correctly. They help ensure:
+- Services are ready to accept connections before dependent services start
+- Containers are restarted automatically if they become unhealthy
+- The overall system remains stable and responsive
+
+### Configured Health Checks
+
+The following containers have health checks configured:
+
+**Redis** (every 5 seconds):
+- Command: `redis-cli ping`
+- Purpose: Verifies Redis is accepting connections
+- Critical: Other services wait for Redis to be healthy before starting
+- Timeout: 3 seconds
+- Retries: 5 attempts before marking unhealthy
+
+**Dashboard** (every 10 seconds):
+- Command: `curl -f http://localhost:8000/`
+- Purpose: Verifies Nginx is serving the web UI
+- Timeout: 3 seconds
+- Retries: 3 attempts before marking unhealthy
+
+**API Service** (every 10 seconds):
+- Command: `curl -f http://localhost:4000/health`
+- Purpose: Verifies the API gateway is responding
+- Timeout: 3 seconds
+- Retries: 3 attempts before marking unhealthy
+
+### What You'll See
+
+When monitoring Docker events or logs, you may observe:
+
+**Health Check Activity**:
+- Health check commands run every 5-10 seconds (this is normal)
+- You'll see periodic container executions in Docker events
+- These are lightweight operations that don't impact performance
+
+**Temporary Alpine Containers**:
+- Short-lived Alpine containers may appear during disconnect/reconnect operations
+- These are created by iptables commands to manipulate network rules
+- They are automatically removed after completing their task
+- This is expected behavior for the relay proxy connection toggle feature
+
+### Viewing Health Status
+
+Check the health status of all containers:
+
+```bash
+# View health status for all services
+docker-compose ps
+
+# View detailed health check logs for a specific container
+docker inspect redis --format='{{json .State.Health}}' | jq
+
+# Monitor health check events in real-time
+docker events --filter type=container --filter event=health_status
+
+# View health check history
+docker inspect redis --format='{{range .State.Health.Log}}{{.Start}} - {{.ExitCode}} - {{.Output}}{{end}}'
+```
+
+### Health Check Dependencies
+
+The docker-compose.yml configuration uses health checks to manage startup order:
+
+**Redis → Relay Proxy**:
+- Relay Proxy waits for Redis to be healthy before starting
+- Ensures Redis is ready to accept connections for flag storage
+- Prevents connection errors during initialization
+
+**Redis → PHP Application**:
+- PHP application waits for Redis to be healthy before starting
+- Ensures Redis is available for daemon mode flag reads
+- Prevents PHP SDK initialization failures
+
+**No Dependencies for Dashboard**:
+- Dashboard is a static site that doesn't require backend services to start
+- Remains available even if backend services restart
+- Connects to services via client-side JavaScript
+
+### Troubleshooting Health Checks
+
+If a container is marked as unhealthy:
+
+```bash
+# Check why a container is unhealthy
+docker inspect <container-name> --format='{{json .State.Health}}' | jq
+
+# View recent health check failures
+docker-compose logs <container-name> | grep -i health
+
+# Manually run the health check command
+docker exec <container-name> <health-check-command>
+
+# Example: Test Redis health check manually
+docker exec redis redis-cli ping
+
+# Example: Test API service health check manually
+docker exec api-service curl -f http://localhost:4000/health
+```
+
+**Common Issues**:
+- **Redis unhealthy**: Check if Redis is running and accepting connections
+- **Dashboard unhealthy**: Verify Nginx is running and port 8000 is accessible
+- **API service unhealthy**: Check if the Express server started successfully
+
+### Disabling Health Checks
+
+Health checks can be disabled by removing the `healthcheck` sections from docker-compose.yml, but this is not recommended as it may cause:
+- Services starting before their dependencies are ready
+- Connection errors during initialization
+- Reduced system reliability
 
 ## SDK Configuration Examples
 

@@ -2,8 +2,8 @@ FROM node:24-alpine
 
 WORKDIR /app
 
-# Install curl for healthcheck and docker-cli for container operations
-RUN apk add --no-cache curl docker-cli
+# Install curl for healthcheck, docker-cli for container operations, iptables for network rules, and conntrack for connection tracking
+RUN apk add --no-cache curl docker-cli iptables conntrack-tools
 
 # Copy package files
 COPY package*.json ./

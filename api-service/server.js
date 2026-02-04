@@ -53,6 +53,185 @@ function logError(endpoint, error, context = {}) {
   }));
 }
 
+// Helper function to get container IP address
+async function getContainerIP(containerName) {
+  try {
+    const { stdout } = await execPromise(
+      `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${containerName}`
+    );
+    const ip = stdout.trim();
+    
+    if (!ip) {
+      throw new Error(`Container ${containerName} has no IP address. Container may not be running or not connected to a network.`);
+    }
+    
+    return ip;
+  } catch (error) {
+    // Check if error is due to container not existing
+    if (error.message.includes('no such object') || 
+        error.message.includes('No such object') || 
+        error.message.includes('No such container')) {
+      throw new Error(`Container ${containerName} does not exist`);
+    }
+    
+    // Re-throw with more context
+    throw new Error(`Failed to get IP for container ${containerName}: ${error.message}`);
+  }
+}
+
+// Helper function to check if container is running
+async function checkContainerRunning(containerName) {
+  try {
+    const { stdout } = await execPromise(
+      `docker inspect -f '{{.State.Running}}' ${containerName}`
+    );
+    return stdout.trim() === 'true';
+  } catch (error) {
+    // If container doesn't exist or any other error occurs, return false
+    return false;
+  }
+}
+
+// Helper function to resolve LaunchDarkly domains to IP addresses
+async function resolveLaunchDarklyDomains() {
+  const domains = [
+    'clientstream.launchdarkly.com',
+    'app.launchdarkly.com',
+    'events.launchdarkly.com'
+  ];
+  
+  const ips = new Set();
+  
+  for (const domain of domains) {
+    try {
+      const { stdout } = await execPromise(`dig +short ${domain}`);
+      const resolvedIPs = stdout.trim().split('\n').filter(ip => {
+        // Filter out empty lines and CNAME records (which contain dots but are domain names)
+        // Valid IPv4 addresses have 4 octets separated by dots
+        if (!ip || ip.trim() === '') return false;
+        
+        // Check if it's a valid IPv4 address (simple check: starts with a digit)
+        // This filters out CNAME records which typically start with letters
+        const trimmedIP = ip.trim();
+        return /^\d+\.\d+\.\d+\.\d+$/.test(trimmedIP);
+      });
+      
+      resolvedIPs.forEach(ip => ips.add(ip.trim()));
+    } catch (error) {
+      // Log warning but continue with other domains
+      console.warn(`Failed to resolve ${domain}:`, error.message);
+    }
+  }
+  
+  return Array.from(ips);
+}
+
+// Helper function to add iptables blocking rules
+async function addBlockingRules(containerIP, targetIPs) {
+  let rulesAdded = 0;
+  
+  for (const targetIP of targetIPs) {
+    try {
+      // Check if rule already exists
+      // iptables -C returns exit code 0 if rule exists, non-zero if it doesn't
+      try {
+        await execPromise(
+          `iptables -C FORWARD -s ${containerIP} -d ${targetIP} -j DROP`
+        );
+        // Rule already exists, skip adding
+        console.log(`Rule already exists for ${containerIP} -> ${targetIP}`);
+      } catch (checkError) {
+        // Rule doesn't exist, add it
+        await execPromise(
+          `iptables -I FORWARD -s ${containerIP} -d ${targetIP} -j DROP`
+        );
+        rulesAdded++;
+        console.log(`Added blocking rule for ${containerIP} -> ${targetIP}`);
+      }
+    } catch (error) {
+      console.error(`Failed to add rule for ${targetIP}:`, error.message);
+    }
+  }
+  
+  return rulesAdded;
+}
+
+// Helper function to remove iptables blocking rules
+async function removeBlockingRules(containerIP) {
+  let rulesRemoved = 0;
+  
+  try {
+    // List all rules matching our pattern
+    const { stdout } = await execPromise(
+      `iptables -S FORWARD | grep "\\-s ${containerIP}.*\\-j DROP"`
+    );
+    
+    const rules = stdout.trim().split('\n').filter(r => r.trim());
+    
+    for (const rule of rules) {
+      // Convert -A to -D for deletion
+      const deleteRule = rule.replace('-A FORWARD', '-D FORWARD');
+      
+      try {
+        await execPromise(`iptables ${deleteRule}`);
+        rulesRemoved++;
+        console.log(`Removed blocking rule: ${rule}`);
+      } catch (error) {
+        console.error(`Failed to remove rule: ${rule}`, error.message);
+      }
+    }
+  } catch (error) {
+    // No rules found or error listing rules
+    console.log('No blocking rules found or error listing rules:', error.message);
+  }
+  
+  return rulesRemoved;
+}
+
+// Helper function to check if disconnection is active
+async function checkDisconnectionStatus() {
+  try {
+    const containerIP = await getContainerIP('relay-proxy');
+    const { stdout } = await execPromise(
+      `iptables -S FORWARD | grep "\\-s ${containerIP}.*\\-j DROP" | wc -l`
+    );
+    return parseInt(stdout.trim()) > 0;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Helper function to count active blocking rules
+async function countBlockingRules(containerIP) {
+  try {
+    const { stdout } = await execPromise(
+      `iptables -S FORWARD | grep "\\-s ${containerIP}.*\\-j DROP" | wc -l`
+    );
+    return parseInt(stdout.trim());
+  } catch (error) {
+    return 0;
+  }
+}
+
+// Helper function to get list of blocked IPs
+async function getBlockedIPs(containerIP) {
+  try {
+    const { stdout } = await execPromise(
+      `iptables -S FORWARD | grep "\\-s ${containerIP}.*\\-j DROP"`
+    );
+    
+    const rules = stdout.trim().split('\n').filter(r => r.trim());
+    const ips = rules.map(rule => {
+      const match = rule.match(/-d ([0-9.]+)/);
+      return match ? match[1] : null;
+    }).filter(ip => ip);
+    
+    return ips;
+  } catch (error) {
+    return [];
+  }
+}
+
 // Helper function to fetch with timeout
 async function fetchWithTimeout(url, options = {}, timeout = 5000) {
   const controller = new AbortController();
@@ -1260,8 +1439,257 @@ app.post('/api/load-test', async (req, res) => {
   }
 });
 
+// Helper function to ensure DOCKER-USER chain exists
+async function ensureDockerUserChain() {
+  try {
+    // Check if DOCKER-USER chain exists
+    await execPromise('iptables -L DOCKER-USER -n 2>&1');
+  } catch (error) {
+    // Chain doesn't exist, create it
+    try {
+      await execPromise('iptables -N DOCKER-USER');
+      // Add a rule to jump back to RETURN (allow by default)
+      await execPromise('iptables -A DOCKER-USER -j RETURN');
+      console.log('Created DOCKER-USER chain');
+    } catch (createError) {
+      console.error('Failed to create DOCKER-USER chain:', createError.message);
+      throw createError;
+    }
+  }
+}
+
+// Helper function to get Docker network subnet
+async function getDockerNetworkSubnet(networkName) {
+  try {
+    // Try with the full compose project name prefix first
+    let fullNetworkName = `launchdarkly-relay-proxy-enterprise-demo_${networkName}`;
+    let { stdout } = await execPromise(
+      `docker network inspect ${fullNetworkName} --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || echo ""`
+    );
+    
+    if (!stdout.trim()) {
+      // Try without prefix
+      ({ stdout } = await execPromise(
+        `docker network inspect ${networkName} --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || echo ""`
+      ));
+    }
+    
+    return stdout.trim() || null;
+  } catch (error) {
+    console.error(`Failed to get subnet for network ${networkName}:`, error.message);
+    return null;
+  }
+}
+
+// Relay Proxy disconnect endpoint
+app.post('/api/relay-proxy/disconnect', async (req, res) => {
+  try {
+    // 1. Check if container is running
+    const isRunning = await checkContainerRunning('relay-proxy');
+    if (!isRunning) {
+      return res.status(500).json({
+        success: false,
+        error: 'Container relay-proxy is not running'
+      });
+    }
+    
+    // 2. Ensure DOCKER-USER chain exists
+    await ensureDockerUserChain();
+    
+    // 3. Get container IP address
+    const containerIP = await getContainerIP('relay-proxy');
+    
+    // 4. Get Docker network subnet to allow internal traffic
+    const subnet = await getDockerNetworkSubnet('launchdarkly-network');
+    if (!subnet) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to determine Docker network subnet'
+      });
+    }
+    
+    // 5. Check if already disconnected by checking for existing rule on the Docker host
+    try {
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`
+      );
+      // If command succeeds, rule exists - but we should still restart to ensure disconnection
+      console.log('Rule already exists, will restart relay-proxy to ensure disconnection');
+    } catch (error) {
+      // Rule doesn't exist, will add it
+    }
+    
+    // 6. Add iptables rule to block external traffic
+    // We need to use docker exec to run iptables on the Docker host (VM on macOS)
+    // This is the only way to actually block traffic on Docker Desktop
+    try {
+      // First, try to remove any existing rule
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>/dev/null || true`
+      );
+      
+      // Add the blocking rule on the Docker host
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP`
+      );
+      
+      console.log(`Added DOCKER-USER rule on host: block ${containerIP} to internet, allow ${subnet}`);
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: `Failed to add iptables rule: ${error.message}`
+      });
+    }
+    
+    // 7. Don't restart the container - let it keep serving cached data
+    // The iptables rule will block new connections to LaunchDarkly
+    // Existing streaming connections will eventually timeout and fail to reconnect
+    console.log('Relay-proxy disconnected - existing connections will timeout, but cache remains available');
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Relay Proxy disconnected from LaunchDarkly',
+      containerIP,
+      subnet,
+      rule: `Block ${containerIP} to internet, allow ${subnet}`
+    });
+    
+  } catch (error) {
+    logError('/api/relay-proxy/disconnect', error, {
+      operation: 'disconnect'
+    });
+    
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to disconnect relay proxy'
+    });
+  }
+});
+
+// Relay Proxy reconnect endpoint
+app.post('/api/relay-proxy/reconnect', async (req, res) => {
+  try {
+    // 1. Get container IP address
+    const containerIP = await getContainerIP('relay-proxy');
+    
+    // 2. Get Docker network subnet
+    const subnet = await getDockerNetworkSubnet('launchdarkly-network');
+    if (!subnet) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to determine Docker network subnet'
+      });
+    }
+    
+    // 3. Check if already connected by checking for rule on the Docker host
+    try {
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`
+      );
+      // Rule exists, need to remove it
+    } catch (error) {
+      // Rule doesn't exist, already connected
+      return res.status(200).json({
+        success: true,
+        message: 'Relay Proxy already connected',
+        containerIP,
+        subnet
+      });
+    }
+    
+    // 4. Remove the iptables rule from DOCKER-USER chain on the Docker host
+    try {
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP`
+      );
+      console.log(`Removed DOCKER-USER rule from host for ${containerIP}`);
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: `Failed to remove iptables rule: ${error.message}`
+      });
+    }
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Relay Proxy reconnected to LaunchDarkly',
+      containerIP,
+      subnet
+    });
+    
+  } catch (error) {
+    logError('/api/relay-proxy/reconnect', error, {
+      operation: 'reconnect'
+    });
+    
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to reconnect relay proxy'
+    });
+  }
+});
+
+// Relay Proxy connection status endpoint
+app.get('/api/relay-proxy/connection-status', async (req, res) => {
+  try {
+    // 1. Check if container is running
+    const isRunning = await checkContainerRunning('relay-proxy');
+    if (!isRunning) {
+      return res.status(200).json({
+        connected: false,
+        containerRunning: false
+      });
+    }
+    
+    // 2. Get container IP and network subnet
+    const containerIP = await getContainerIP('relay-proxy');
+    const subnet = await getDockerNetworkSubnet('launchdarkly-network');
+    
+    if (!subnet) {
+      return res.status(200).json({
+        connected: true, // Assume connected if we can't check
+        containerRunning: true,
+        error: 'Could not determine network subnet'
+      });
+    }
+    
+    // 3. Check if blocking rule exists in DOCKER-USER chain on the Docker host
+    try {
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`
+      );
+      // Rule exists, so it's disconnected
+      return res.status(200).json({
+        connected: false,
+        containerRunning: true,
+        containerIP,
+        subnet
+      });
+    } catch (error) {
+      // Rule doesn't exist, so it's connected
+      return res.status(200).json({
+        connected: true,
+        containerRunning: true,
+        containerIP,
+        subnet
+      });
+    }
+    
+  } catch (error) {
+    logError('/api/relay-proxy/connection-status', error, {
+      operation: 'connection-status'
+    });
+    
+    return res.status(500).json({
+      connected: false,
+      containerRunning: false,
+      error: error.message
+    });
+  }
+});
+
 // Export app and helper functions for testing
-module.exports = { app, logError, fetchWithTimeout };
+module.exports = { app, logError, fetchWithTimeout, getContainerIP, checkContainerRunning, resolveLaunchDarklyDomains, addBlockingRules, removeBlockingRules, checkDisconnectionStatus, countBlockingRules, getBlockedIPs };
 
 // Only start server if this file is run directly (not imported)
 if (require.main === module) {

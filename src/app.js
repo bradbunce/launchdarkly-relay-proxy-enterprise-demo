@@ -8,6 +8,10 @@ const { getLaunchDarklyClient, getInitializationError, getInspectableStore, onFl
 
 const execPromise = util.promisify(exec);
 
+// Import HashValueExposer for bucketing hash calculations
+const { HashValueExposer } = require('./nodejs/src/HashValueExposer.js');
+const hashExposer = new HashValueExposer();
+
 // Import undici Agent for custom fetch timeouts
 let sseAgent = null;
 try {
@@ -323,91 +327,11 @@ function createApp() {
     });
   });
   
-  // API endpoint to evaluate terminal-panels flag
-  app.get('/api/terminal-panels', async (req, res) => {
-    const ldClient = getLaunchDarklyClient();
-    
-    if (!ldClient) {
-      // Default to true if SDK not available
-      return res.json({ showTerminalPanels: true });
-    }
-    
-    try {
-      // Use a simple anonymous context for this flag (not user-specific)
-      const context = {
-        kind: 'user',
-        key: 'dashboard-user',
-        anonymous: true
-      };
-      
-      const showTerminalPanels = await ldClient.variation('terminal-panels', context, true);
-      res.json({ showTerminalPanels });
-    } catch (error) {
-      console.error('Error evaluating terminal-panels flag:', error);
-      res.json({ showTerminalPanels: true }); // Default to true on error
-    }
-  });
-  
-  // SSE endpoint for terminal-panels flag real-time updates
-  const terminalPanelsSseClients = new Set();
-  
-  app.get('/api/terminal-panels/stream', (req, res) => {
-    // Set headers for SSE
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    
-    // Add client to set
-    const clientInfo = { res };
-    terminalPanelsSseClients.add(clientInfo);
-    
-    // Send initial value
-    sendTerminalPanelsValue(clientInfo);
-    
-    // Remove client on disconnect
-    req.on('close', () => {
-      terminalPanelsSseClients.delete(clientInfo);
-    });
-  });
-  
-  // Helper function to evaluate and send terminal-panels flag value
-  async function sendTerminalPanelsValue(clientInfo) {
-    const ldClient = getLaunchDarklyClient();
-    
-    let showTerminalPanels = true; // Default
-    
-    if (ldClient) {
-      try {
-        const context = {
-          kind: 'user',
-          key: 'dashboard-user',
-          anonymous: true
-        };
-        
-        showTerminalPanels = await ldClient.variation('terminal-panels', context, true);
-      } catch (error) {
-        console.error('Error evaluating terminal-panels flag:', error);
-      }
-    }
-    
-    clientInfo.res.write(`data: ${JSON.stringify({ showTerminalPanels })}\n\n`);
-  }
-  
-  // Broadcast terminal-panels value to all connected clients
-  async function broadcastTerminalPanelsValue() {
-    console.log(`Broadcasting terminal-panels to ${terminalPanelsSseClients.size} connected clients`);
-    for (const clientInfo of terminalPanelsSseClients) {
-      await sendTerminalPanelsValue(clientInfo);
-    }
-  }
-  
-  // Add terminal-panels broadcast to flag change listener
-  const originalOnFlagChange = onFlagChange;
+  // Add flag change listener for broadcasting updates
   onFlagChange((settings) => {
     console.log('Flag change callback triggered');
     broadcastMessage();
     broadcastNodeServiceMessage();
-    broadcastTerminalPanelsValue(); // Add terminal-panels broadcast
   });
 
 
@@ -843,6 +767,7 @@ function createApp() {
     const ldClient = getLaunchDarklyClient();
     
     let message = 'Unexpected Error: No message was set (this should not happen)';
+    let hashInfo = null;
     
     if (!ldClient) {
       const error = getInitializationError();
@@ -851,7 +776,7 @@ function createApp() {
       } else {
         message = 'SDK Error: LaunchDarkly client not initialized (unknown reason)\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"';
       }
-      clientInfo.res.write(`data: ${JSON.stringify({ message })}\n\n`);
+      clientInfo.res.write(`data: ${JSON.stringify({ message, hashInfo })}\n\n`);
       return;
     }
     
@@ -872,6 +797,8 @@ function createApp() {
         const context = buildNodeServiceContext(clientInfo.req);
         const fallbackValue = await ldClient.variation('user-message', context, 'Fallback: Flag not found or SDK offline');
         message = 'SDK Error: ' + initError + '\n\nUsing fallback variation: "' + fallbackValue + '"';
+        clientInfo.res.write(`data: ${JSON.stringify({ message, hashInfo: null })}\n\n`);
+        return;
       } else {
         const context = buildNodeServiceContext(clientInfo.req);
         
@@ -904,6 +831,37 @@ function createApp() {
         // Now evaluate the flag
         message = await ldClient.variation('user-message', context, 'Fallback: Flag not found or SDK offline');
         
+        // Calculate hash value for bucketing demonstration
+        try {
+          // Get flag configuration to extract salt
+          const store = getInspectableStore();
+          if (store) {
+            const storeData = store.inspect();
+            const flagConfig = storeData.features?.['user-message'];
+            
+            // Use the flag's salt property directly (LaunchDarkly's approach)
+            // The salt is a property in the flag configuration
+            const salt = flagConfig?.salt || 'user-message';
+            
+            // Calculate hash value
+            const hashResult = hashExposer.expose({
+              flagKey: 'user-message',
+              contextKey: context.user.key,
+              salt: salt
+            });
+            
+            if (!hashResult.error) {
+              hashInfo = {
+                hashValue: hashResult.hashValue,
+                bucketValue: hashResult.bucketValue,
+                salt: hashResult.salt
+              };
+            }
+          }
+        } catch (hashError) {
+          console.error('[Hash Calculation] Error calculating hash value:', hashError);
+        }
+        
         const nodeServiceContext = clientInfo.req.session.nodeServiceContext;
         const contextKey = `node-service|${context.user.key}`;
         const lastValue = lastFlagValues.get(contextKey);
@@ -913,6 +871,10 @@ function createApp() {
           console.log(`Context: ${context.user.anonymous ? 'Anonymous' : 'Custom'} (${context.user.key})`);
           console.log(`Previous value: "${lastValue}"`);
           console.log(`New value: "${message}"`);
+          if (hashInfo) {
+            console.log(`Hash Value: ${hashInfo.hashValue}`);
+            console.log(`Bucket Value: ${hashInfo.bucketValue}`);
+          }
           console.log(`==========================================`);
         }
         lastFlagValues.set(contextKey, message);
@@ -922,7 +884,7 @@ function createApp() {
       message = 'Flag Evaluation Error: ' + error.message + '\n\nUsing fallback variation: "Fallback: Flag not found or SDK offline"';
     }
     
-    clientInfo.res.write(`data: ${JSON.stringify({ message })}\n\n`);
+    clientInfo.res.write(`data: ${JSON.stringify({ message, hashInfo })}\n\n`);
   }
 
   // Broadcast message to all Node.js service clients
@@ -1103,11 +1065,45 @@ function createApp() {
       console.log("Node.js SDK: Evaluating flag 'user-message'");
       const flagValue = await ldClient.variation('user-message', context, 'Fallback: Flag not found');
       console.log(`Node.js SDK: Flag evaluation result: ${flagValue}`);
+      
+      // Calculate hash value for bucketing demonstration
+      let hashInfo = null;
+      try {
+        const store = getInspectableStore();
+        if (store) {
+          const storeData = store.inspect();
+          const flagConfig = storeData.features?.['user-message'];
+          
+          // Use the flag's salt property directly (LaunchDarkly's approach)
+          const salt = flagConfig?.salt || 'user-message';
+          
+          // Calculate hash value
+          const hashResult = hashExposer.expose({
+            flagKey: 'user-message',
+            contextKey: context.user.key,
+            salt: salt
+          });
+          
+          if (!hashResult.error) {
+            hashInfo = {
+              hashValue: hashResult.hashValue,
+              bucketValue: hashResult.bucketValue,
+              salt: hashResult.salt
+            };
+            console.log(`Hash Value: ${hashInfo.hashValue}`);
+            console.log(`Bucket Value: ${hashInfo.bucketValue}`);
+          }
+        }
+      } catch (hashError) {
+        console.error('Error calculating hash value:', hashError);
+      }
+      
       console.log('===========================');
       
       res.json({
         success: true,
         flagValue: flagValue,
+        hashInfo: hashInfo,
         context: {
           type: nodeServiceContext.type,
           key: context.user.key,

@@ -11,6 +11,10 @@ RUN apk add --no-cache \
 # Install PHP extensions
 RUN docker-php-ext-install pcntl
 
+# Install GMP extension for large integer handling
+RUN apk add --no-cache gmp-dev \
+    && docker-php-ext-install gmp
+
 # Install Redis PHP extension
 RUN apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
     && pecl install redis \
@@ -36,6 +40,10 @@ WORKDIR /var/www/html
 
 # Copy application files
 COPY composer.json ./
+
+# Copy HashValueExposer library
+COPY hash-exposer-src ./hash-exposer/src/
+
 RUN composer install --no-dev --optimize-autoloader
 
 COPY index.php ./

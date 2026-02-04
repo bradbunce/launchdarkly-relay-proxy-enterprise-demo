@@ -236,6 +236,182 @@ Collects CPU and memory metrics from the Relay Proxy container.
 }
 ```
 
+### Relay Proxy Connection Control
+
+#### POST /api/relay-proxy/disconnect
+
+Simulates a network disconnection between the Relay Proxy and LaunchDarkly by blocking outbound traffic using iptables rules. The Relay Proxy container remains running, but cannot communicate with LaunchDarkly domains. This allows testing scenarios where the Relay Proxy is operational but cannot receive flag updates.
+
+**Request:**
+```bash
+curl -X POST http://localhost:4000/api/relay-proxy/disconnect \
+  -H "Content-Type: application/json"
+```
+
+**Response (Success - First Disconnect):**
+```json
+{
+  "success": true,
+  "message": "Relay Proxy disconnected from LaunchDarkly",
+  "blockedIPs": ["52.1.2.3", "52.4.5.6"],
+  "rulesAdded": 2
+}
+```
+
+**Response (Success - Already Disconnected):**
+```json
+{
+  "success": true,
+  "message": "Relay Proxy already disconnected",
+  "blockedIPs": ["52.1.2.3", "52.4.5.6"],
+  "rulesAdded": 0
+}
+```
+
+**Response (Error - Container Not Running):**
+```json
+{
+  "success": false,
+  "error": "Container relay-proxy is not running"
+}
+```
+
+**Response (Error - DNS Resolution Failed):**
+```json
+{
+  "success": false,
+  "error": "Failed to resolve LaunchDarkly domains to IP addresses"
+}
+```
+
+**Response (Error - iptables Failure):**
+```json
+{
+  "success": false,
+  "error": "Failed to add iptables rules: permission denied"
+}
+```
+
+**Status Codes:**
+- `200`: Operation successful (including idempotent cases)
+- `500`: Operation failed (container not running, DNS failure, iptables error)
+
+**Behavior:**
+- Resolves LaunchDarkly domains (`clientstream.launchdarkly.com`, `app.launchdarkly.com`, `events.launchdarkly.com`) to IP addresses
+- Creates iptables FORWARD rules to block traffic from Relay Proxy container to resolved IPs
+- Operation is idempotent - calling disconnect twice returns success both times
+- Relay Proxy container remains running and accessible to SDK clients
+- Internal Docker network connectivity (Redis access) is preserved
+- SDK clients continue to receive cached flags from Redis
+
+**Use Cases:**
+- Testing application behavior when flag updates are unavailable
+- Demonstrating resilience of daemon mode (PHP) vs proxy mode (Node.js)
+- Simulating network partitions or LaunchDarkly service outages
+- Validating that applications continue to function with cached flags
+
+#### POST /api/relay-proxy/reconnect
+
+Restores network connectivity between the Relay Proxy and LaunchDarkly by removing all iptables blocking rules. The Relay Proxy will resume receiving flag updates from LaunchDarkly.
+
+**Request:**
+```bash
+curl -X POST http://localhost:4000/api/relay-proxy/reconnect \
+  -H "Content-Type: application/json"
+```
+
+**Response (Success - Reconnected):**
+```json
+{
+  "success": true,
+  "message": "Relay Proxy reconnected to LaunchDarkly",
+  "rulesRemoved": 2
+}
+```
+
+**Response (Success - Already Connected):**
+```json
+{
+  "success": true,
+  "message": "Relay Proxy already connected",
+  "rulesRemoved": 0
+}
+```
+
+**Response (Error - iptables Failure):**
+```json
+{
+  "success": false,
+  "error": "Failed to remove iptables rules: permission denied"
+}
+```
+
+**Status Codes:**
+- `200`: Operation successful (including idempotent cases)
+- `500`: Operation failed (iptables error, container IP retrieval failure)
+
+**Behavior:**
+- Removes all iptables FORWARD rules blocking traffic from Relay Proxy container
+- Operation is idempotent - calling reconnect twice returns success both times
+- Relay Proxy immediately resumes communication with LaunchDarkly
+- Flag updates from LaunchDarkly will be received and propagated to SDK clients
+- No container restart required
+
+#### GET /api/relay-proxy/connection-status
+
+Returns the current connection state between the Relay Proxy and LaunchDarkly by checking for active iptables blocking rules.
+
+**Request:**
+```bash
+curl http://localhost:4000/api/relay-proxy/connection-status
+```
+
+**Response (Connected):**
+```json
+{
+  "connected": true,
+  "containerRunning": true,
+  "blockedIPs": [],
+  "activeRules": 0
+}
+```
+
+**Response (Disconnected):**
+```json
+{
+  "connected": false,
+  "containerRunning": true,
+  "blockedIPs": ["52.1.2.3", "52.4.5.6"],
+  "activeRules": 2
+}
+```
+
+**Response (Container Stopped):**
+```json
+{
+  "connected": false,
+  "containerRunning": false,
+  "blockedIPs": [],
+  "activeRules": 0
+}
+```
+
+**Status Codes:**
+- `200`: Status retrieved successfully
+
+**Response Fields:**
+- `connected` (boolean): `true` if no blocking rules exist, `false` otherwise
+- `containerRunning` (boolean): `true` if relay-proxy container is running
+- `blockedIPs` (array): List of LaunchDarkly IP addresses currently blocked
+- `activeRules` (number): Count of active iptables blocking rules
+
+**Behavior:**
+- Checks if relay-proxy container is running
+- Counts active iptables rules blocking LaunchDarkly traffic
+- Returns list of blocked IP addresses
+- Connection state persists across dashboard refreshes
+- Status updates automatically when disconnect/reconnect operations are performed
+
 ### Health Check
 
 #### GET /health

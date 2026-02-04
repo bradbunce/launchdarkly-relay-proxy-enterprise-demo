@@ -120,6 +120,15 @@ php/composer.lock
 *.integration.test.js
 test-*.sh
 test-output.log
+test-vectors.json
+verify-*.js
+verify-*.php
+run-pbt-tests.sh
+PBT-TESTING.md
+
+# Hash exposer test files (keep source code, exclude tests)
+src/nodejs/tests/
+src/php/tests/
 
 # Temporary work/documentation files
 *_FIX.md

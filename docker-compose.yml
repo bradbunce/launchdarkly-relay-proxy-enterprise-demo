@@ -23,6 +23,10 @@ services:
       dockerfile: dashboard/Dockerfile
     ports:
       - "8000:8000"  # External:Internal - Web UI access
+    # Environment Variables:
+    # - LAUNCHDARKLY_CLIENT_SIDE_ID: Client-side ID for JavaScript SDK
+    environment:
+      - LAUNCHDARKLY_CLIENT_SIDE_ID=${LAUNCHDARKLY_CLIENT_SIDE_ID}
     networks:
       - launchdarkly-network
     # No service dependencies - dashboard is a static site that connects
@@ -66,8 +70,14 @@ services:
     #   Mounted read-write to allow container inspection and log retrieval
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    # User: root required to access Docker socket
+    # User: root required to access Docker socket and iptables
     user: root
+    # Network capabilities: Required for iptables manipulation
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    # Privileged mode: Required for iptables access to host network
+    privileged: true
     networks:
       - launchdarkly-network
     # Service Dependencies:

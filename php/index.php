@@ -17,6 +17,10 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 use LaunchDarkly\LDClient;
 use LaunchDarkly\Integrations\Redis;
+use LaunchDarkly\HashValueExposer\HashValueExposer;
+
+// Create hash exposer instance
+$hashExposer = new HashValueExposer();
 
 // In-memory context store to share context between POST endpoint and SSE connections
 // This is stored in a file since PHP doesn't have persistent memory between requests
@@ -144,37 +148,41 @@ function buildContextFromSession($contextKeyFromUrl = null) {
     
     log_message('[buildContextFromSession] Context data: ' . json_encode($contextData));
     
-    $contextBuilder = \LaunchDarkly\LDContext::builder($contextData['key']);
-    $contextBuilder->kind('user');
+    // Build user context
+    $userContextBuilder = \LaunchDarkly\LDContext::builder($contextData['key']);
+    $userContextBuilder->kind('user');
     
     if (isset($contextData['name'])) {
-        $contextBuilder->name($contextData['name']);
+        $userContextBuilder->name($contextData['name']);
         log_message('[buildContextFromSession] Added name: ' . $contextData['name']);
     }
     if (isset($contextData['email'])) {
-        $contextBuilder->set('email', $contextData['email']);
+        $userContextBuilder->set('email', $contextData['email']);
         log_message('[buildContextFromSession] Added email: ' . $contextData['email']);
     }
     if (isset($contextData['location'])) {
-        $contextBuilder->set('location', $contextData['location']);
+        $userContextBuilder->set('location', $contextData['location']);
         log_message('[buildContextFromSession] Added location: ' . $contextData['location']);
     } else {
         log_message('[buildContextFromSession] NO LOCATION in context!');
     }
     if (isset($contextData['anonymous'])) {
-        $contextBuilder->set('anonymous', $contextData['anonymous']);
+        $userContextBuilder->set('anonymous', $contextData['anonymous']);
     }
     
-    $context = $contextBuilder->build();
-    log_message('[buildContextFromSession] Final context: ' . json_encode([
-        'key' => $context->getKey(),
-        'name' => $context->getName(),
-        'email' => $contextData['email'] ?? null,
-        'location' => $contextData['location'] ?? null,
-        'anonymous' => $contextData['anonymous'] ?? false
-    ]));
+    $userContext = $userContextBuilder->build();
     
-    return $context;
+    // Build container context (static for PHP service)
+    $containerContext = \LaunchDarkly\LDContext::builder('php-app')
+        ->kind('container')
+        ->build();
+    
+    // Create multi-context combining user and container
+    $multiContext = \LaunchDarkly\LDContext::createMulti($userContext, $containerContext);
+    
+    log_message('[buildContextFromSession] Final multi-context: user=' . $userContext->getKey() . ', container=php-app');
+    
+    return $multiContext;
 }
 
 // Initialize the global client once when the script loads
@@ -400,11 +408,63 @@ if ($requestUri === '/api/test-evaluation' && $requestMethod === 'POST') {
         log_message("PHP SDK: Evaluating flag 'user-message'");
         $flagValue = $client->variation('user-message', $context, 'Hello from PHP (Fallback - Redis unavailable)');
         log_message("PHP SDK: Flag evaluation result: {$flagValue}");
+        
+        // Calculate hash value for bucketing demonstration
+        $hashInfo = null;
+        try {
+            global $hashExposer;
+            
+            // Get salt from flag configuration in Redis
+            $salt = 'user-message'; // Default fallback
+            try {
+                $redisHost = getenv('REDIS_HOST') ?: 'redis';
+                $redisPort = getenv('REDIS_PORT') ?: 6379;
+                $redisPrefix = getenv('REDIS_PREFIX') ?: '';
+                
+                $redisClient = new Predis\Client([
+                    'scheme' => 'tcp',
+                    'host' => $redisHost,
+                    'port' => (int)$redisPort
+                ]);
+                
+                $flagsKey = $redisPrefix ? "{$redisPrefix}:features" : "features";
+                $flagData = $redisClient->hget($flagsKey, 'user-message');
+                
+                if ($flagData) {
+                    $flagConfig = json_decode($flagData, true);
+                    if (isset($flagConfig['salt'])) {
+                        $salt = $flagConfig['salt'];
+                    }
+                }
+            } catch (Exception $redisError) {
+                log_message("PHP SDK: Could not get salt from Redis: " . $redisError->getMessage());
+            }
+            
+            $hashResult = $hashExposer->expose([
+                'flagKey' => 'user-message',
+                'contextKey' => $context->getKey(),
+                'salt' => $salt
+            ]);
+            
+            if (!isset($hashResult['error'])) {
+                $hashInfo = [
+                    'hashValue' => $hashResult['hashValue'],
+                    'bucketValue' => $hashResult['bucketValue'],
+                    'salt' => $hashResult['salt']
+                ];
+                log_message("PHP SDK: Hash Value: {$hashInfo['hashValue']}");
+                log_message("PHP SDK: Bucket Value: {$hashInfo['bucketValue']}");
+            }
+        } catch (Exception $hashError) {
+            log_message("PHP SDK: Error calculating hash value: " . $hashError->getMessage());
+        }
+        
         log_message("===========================");
         
         echo json_encode([
             'success' => true,
             'flagValue' => $flagValue,
+            'hashInfo' => $hashInfo,
             'context' => [
                 'type' => $contextData['type'],
                 'key' => $context->getKey(),
@@ -664,8 +724,12 @@ if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
     log_message("PHP SDK: Output buffering disabled");
     
     // Helper function to send SSE message
-    function sendSSE($message) {
-        echo "data: " . json_encode(['message' => $message]) . "\n\n";
+    function sendSSE($message, $hashInfo = null) {
+        $data = ['message' => $message];
+        if ($hashInfo !== null) {
+            $data['hashInfo'] = $hashInfo;
+        }
+        echo "data: " . json_encode($data) . "\n\n";
         if (ob_get_level() > 0) {
             ob_flush();
         }
@@ -725,8 +789,56 @@ if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
         
         log_message("PHP SDK: Sending SSE message: " . $message);
         
-        // Send actual flag value
-        sendSSE($message);
+        // Calculate hash value for bucketing demonstration
+        $hashInfo = null;
+        try {
+            global $hashExposer;
+            
+            // Get salt from flag configuration in Redis
+            $salt = 'user-message'; // Default fallback
+            try {
+                $redisHost = getenv('REDIS_HOST') ?: 'redis';
+                $redisPort = getenv('REDIS_PORT') ?: 6379;
+                $redisPrefix = getenv('REDIS_PREFIX') ?: '';
+                
+                $redisClient = new Predis\Client([
+                    'scheme' => 'tcp',
+                    'host' => $redisHost,
+                    'port' => (int)$redisPort
+                ]);
+                
+                $flagsKey = $redisPrefix ? "{$redisPrefix}:features" : "features";
+                $flagData = $redisClient->hget($flagsKey, 'user-message');
+                
+                if ($flagData) {
+                    $flagConfig = json_decode($flagData, true);
+                    if (isset($flagConfig['salt'])) {
+                        $salt = $flagConfig['salt'];
+                    }
+                }
+            } catch (Exception $redisError) {
+                log_message("PHP SDK: Could not get salt from Redis: " . $redisError->getMessage());
+            }
+            
+            $hashResult = $hashExposer->expose([
+                'flagKey' => 'user-message',
+                'contextKey' => $context->getKey(),
+                'salt' => $salt
+            ]);
+            
+            if (!isset($hashResult['error'])) {
+                $hashInfo = [
+                    'hashValue' => $hashResult['hashValue'],
+                    'bucketValue' => $hashResult['bucketValue'],
+                    'salt' => $hashResult['salt']
+                ];
+            }
+        } catch (Exception $hashError) {
+            log_message("PHP SDK: Error calculating hash value: " . $hashError->getMessage());
+        }
+        
+        // Send actual flag value with hash info
+        sendSSE($message, $hashInfo);
         
         // Keep connection alive and poll for flag changes
         // In daemon mode, flags are read from Redis. The Relay Proxy updates Redis when flags change.

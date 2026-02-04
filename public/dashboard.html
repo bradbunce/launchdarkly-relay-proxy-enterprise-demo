@@ -4,6 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LaunchDarkly Relay Proxy - Unified Dashboard</title>
+  <!-- LaunchDarkly Client-Side ID - Injected from environment variable -->
+  <meta name="ld-client-id" content="${LAUNCHDARKLY_CLIENT_SIDE_ID}">
+  <!-- LaunchDarkly JavaScript SDK -->
+  <script src="https://unpkg.com/launchdarkly-js-client-sdk@3"></script>
   <style>
     * {
       margin: 0;
@@ -443,6 +447,105 @@
     .btn-secondary:hover {
       background-color: #e8e8e8;
     }
+
+    /* Connection Control Styles */
+    .connection-control {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 8px;
+    }
+
+    .connection-toggle {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+    }
+
+    .connection-label {
+      font-weight: 600;
+      color: #333;
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 50px;
+      height: 24px;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: 0.3s;
+      border-radius: 24px;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+
+    input:checked + .toggle-slider {
+      background-color: #4CAF50;
+    }
+
+    input:checked + .toggle-slider:before {
+      transform: translateX(26px);
+    }
+
+    input:disabled + .toggle-slider {
+      background-color: #ddd;
+      cursor: not-allowed;
+    }
+
+    .status-text {
+      font-weight: 500;
+      padding: 4px 12px;
+      border-radius: 4px;
+    }
+
+    .status-text.connected {
+      color: #2e7d32;
+      background: #e8f5e9;
+    }
+
+    .status-text.disconnected {
+      color: #d32f2f;
+      background: #ffebee;
+    }
+
+    .status-text.stopped {
+      color: #757575;
+      background: #f5f5f5;
+    }
+
+    .error-message {
+      margin-top: 10px;
+      padding: 10px;
+      background: #ffebee;
+      color: #c62828;
+      border-radius: 4px;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
@@ -618,6 +721,22 @@
             ⚡ Run Load Test
           </button>
         </div>
+        
+        <!-- Connection Control Section -->
+        <div class="connection-control">
+          <label class="connection-toggle">
+            <span class="connection-label">Connection to LaunchDarkly:</span>
+            <div class="toggle-switch">
+              <input type="checkbox" id="relay-connection-toggle" checked>
+              <span class="toggle-slider"></span>
+            </div>
+            <span id="connection-status-text" class="status-text connected">
+              Connected
+            </span>
+          </label>
+        </div>
+        
+        <div id="connection-error" class="error-message" style="display: none;"></div>
         
         <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
           <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">Relay Proxy Cache</h4>
@@ -908,6 +1027,109 @@
       } else {
         locationInput.placeholder = 'Enter your location (e.g., San Francisco, CA)';
         locationStatus.innerHTML = '<span style="color: #666;">Location auto-detection not supported</span> - <span style="color: #405BFF;">Enter manually</span> <span style="font-size: 11px; color: #999;">(optional)</span>';
+      }
+    }
+    
+    // RelayProxyConnectionControl class for managing relay proxy connection toggle
+    class RelayProxyConnectionControl {
+      constructor() {
+        this.toggle = document.getElementById('relay-connection-toggle');
+        this.statusText = document.getElementById('connection-status-text');
+        this.errorDiv = document.getElementById('connection-error');
+        this.isUpdating = false;
+        this.pollingInterval = null;
+        
+        this.init();
+      }
+      
+      async init() {
+        // Load initial connection status
+        await this.loadConnectionStatus();
+        
+        // Set up toggle event listener
+        this.toggle.addEventListener('change', (e) => this.handleToggle(e));
+        
+        // Poll for status updates every 5 seconds
+        this.pollingInterval = setInterval(() => this.loadConnectionStatus(), 5000);
+      }
+      
+      async loadConnectionStatus() {
+        try {
+          const response = await fetch('http://localhost:4000/api/relay-proxy/connection-status');
+          const data = await response.json();
+          
+          this.updateUI(data.connected, data.containerRunning);
+        } catch (error) {
+          console.error('Failed to load connection status:', error);
+          this.showError('Failed to load connection status');
+        }
+      }
+      
+      async handleToggle(event) {
+        if (this.isUpdating) {
+          event.preventDefault();
+          return;
+        }
+        
+        this.isUpdating = true;
+        this.hideError();
+        
+        const shouldConnect = event.target.checked;
+        const endpoint = shouldConnect 
+          ? '/api/relay-proxy/reconnect'
+          : '/api/relay-proxy/disconnect';
+        
+        try {
+          const response = await fetch(`http://localhost:4000${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          const data = await response.json();
+          
+          if (!data.success) {
+            throw new Error(data.error || 'Operation failed');
+          }
+          
+          // Update UI to reflect new state
+          this.updateUI(shouldConnect, true);
+          
+        } catch (error) {
+          console.error('Connection toggle failed:', error);
+          this.showError(error.message);
+          
+          // Revert toggle to previous state
+          event.target.checked = !shouldConnect;
+          
+        } finally {
+          this.isUpdating = false;
+        }
+      }
+      
+      updateUI(connected, containerRunning) {
+        if (!containerRunning) {
+          this.toggle.disabled = true;
+          this.toggle.checked = false;
+          this.statusText.textContent = 'Container Stopped';
+          this.statusText.className = 'status-text stopped';
+          return;
+        }
+        
+        this.toggle.disabled = false;
+        this.toggle.checked = connected;
+        this.statusText.textContent = connected ? 'Connected' : 'Disconnected';
+        this.statusText.className = connected 
+          ? 'status-text connected' 
+          : 'status-text disconnected';
+      }
+      
+      showError(message) {
+        this.errorDiv.textContent = message;
+        this.errorDiv.style.display = 'block';
+      }
+      
+      hideError() {
+        this.errorDiv.style.display = 'none';
       }
     }
     
@@ -1818,7 +2040,70 @@
     }
     
     document.addEventListener('DOMContentLoaded', async () => {
-      // Create service panel instances
+      // Initialize LaunchDarkly JavaScript SDK FIRST before rendering anything
+      console.log('[Dashboard] Initializing LaunchDarkly JavaScript SDK...');
+      
+      // Get client-side ID from meta tag (injected by server)
+      const clientSideId = document.querySelector('meta[name="ld-client-id"]')?.content;
+      
+      let showTerminalPanels = true; // Default to showing panels
+      
+      if (!clientSideId) {
+        console.error('[Dashboard] LaunchDarkly client-side ID not found. Terminal panels will remain visible.');
+      } else {
+        try {
+          // Initialize the SDK - connects directly to LaunchDarkly (not through Relay Proxy)
+          // Client-side SDKs are designed to connect to LaunchDarkly's CDN
+          // Using a static "container" context for the dashboard
+          const ldClient = window.LDClient.initialize(clientSideId, {
+            kind: 'container',
+            key: 'dashboard'
+          });
+          
+          // Wait for SDK to be ready
+          await ldClient.waitForInitialization();
+          console.log('[Dashboard] LaunchDarkly JavaScript SDK initialized');
+          
+          // Get initial flag value BEFORE rendering
+          showTerminalPanels = ldClient.variation('terminal-panels', true);
+          console.log('[Dashboard] terminal-panels flag value:', showTerminalPanels);
+          
+          // Apply initial state BEFORE any rendering
+          const dashboardContainer = document.querySelector('.dashboard-container');
+          const logsSection = document.querySelector('.logs-section');
+          
+          if (!showTerminalPanels) {
+            console.log('[Dashboard] Hiding terminal panels (initial state)');
+            dashboardContainer.classList.add('hide-logs');
+            logsSection.classList.add('hidden');
+          } else {
+            console.log('[Dashboard] Showing terminal panels (initial state)');
+            dashboardContainer.classList.remove('hide-logs');
+            logsSection.classList.remove('hidden');
+          }
+          
+          // Listen for flag changes
+          ldClient.on('change:terminal-panels', (newValue) => {
+            console.log('[Dashboard] terminal-panels flag changed to:', newValue);
+            
+            if (!newValue) {
+              console.log('[Dashboard] Hiding terminal panels');
+              dashboardContainer.classList.add('hide-logs');
+              logsSection.classList.add('hidden');
+            } else {
+              console.log('[Dashboard] Showing terminal panels');
+              dashboardContainer.classList.remove('hide-logs');
+              logsSection.classList.remove('hidden');
+            }
+          });
+          
+        } catch (error) {
+          console.error('[Dashboard] Failed to initialize LaunchDarkly SDK:', error);
+          console.log('[Dashboard] Terminal panels will remain visible');
+        }
+      }
+      
+      // NOW create service panel instances
       console.log('[Dashboard] Creating service panels...');
       nodePanel = new ServicePanel('node', 'http://localhost:3000/api/node');
       console.log('[Dashboard] Node panel created');
@@ -3259,37 +3544,6 @@
       await new Promise(resolve => setTimeout(resolve, 3000));
       console.log('[Dashboard] SDKs should be initialized');
       
-      // Connect to terminal-panels SSE stream for real-time updates
-      console.log('[Dashboard] Connecting to terminal-panels SSE stream...');
-      const terminalPanelsEventSource = new EventSource('http://localhost:3000/api/terminal-panels/stream');
-      
-      terminalPanelsEventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        console.log('[Dashboard] terminal-panels flag value:', data.showTerminalPanels);
-        
-        const dashboardContainer = document.querySelector('.dashboard-container');
-        const logsSection = document.querySelector('.logs-section');
-        
-        if (!data.showTerminalPanels) {
-          console.log('[Dashboard] Hiding terminal panels');
-          dashboardContainer.classList.add('hide-logs');
-          logsSection.classList.add('hidden');
-        } else {
-          console.log('[Dashboard] Showing terminal panels');
-          dashboardContainer.classList.remove('hide-logs');
-          logsSection.classList.remove('hidden');
-        }
-      };
-      
-      terminalPanelsEventSource.onerror = (error) => {
-        console.error('[Dashboard] terminal-panels SSE error:', error);
-        // Keep current state on error
-      };
-      
-      terminalPanelsEventSource.onopen = () => {
-        console.log('[Dashboard] terminal-panels SSE stream connected');
-      };
-      
       // NOW connect to SSE streams (they will use the established sessions and initialized SDKs)
       console.log('[Dashboard] Connecting SSE streams...');
       nodePanel.connectStream();
@@ -3316,6 +3570,11 @@
       phpAppDevConsole.start();
       relayProxyConsole.start();
       redisMonitorConsole.start();
+      
+      // Initialize relay proxy connection control
+      console.log('[Dashboard] Initializing relay proxy connection control...');
+      const relayProxyConnectionControl = new RelayProxyConnectionControl();
+      console.log('[Dashboard] Relay proxy connection control initialized');
       
       // Set up clear button handlers
       const appDevClearBtn = document.getElementById('node-app-dev-clear');
