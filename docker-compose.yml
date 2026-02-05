@@ -1,12 +1,13 @@
 # LaunchDarkly Relay Proxy Enterprise Demo - Docker Compose Configuration
 #
-# This configuration defines a 6-container microservices architecture:
+# This configuration defines a 7-container microservices architecture:
 # 1. dashboard - Static web UI (Nginx)
 # 2. api-service - API gateway for status checks and operations
 # 3. app (node-app-dev) - Node.js SDK demonstration
 # 4. relay-proxy - LaunchDarkly Relay Proxy
 # 5. redis - Persistent data store
 # 6. php (php-app-dev) - PHP SDK demonstration
+# 7. python (python-app-dev) - Python SDK demonstration
 
 services:
   # ============================================================================
@@ -59,11 +60,13 @@ services:
     # - RELAY_PROXY_URL: URL for relay proxy status checks
     # - NODE_APP_URL: URL for Node.js app status checks
     # - PHP_APP_URL: URL for PHP app status checks
+    # - PYTHON_APP_URL: URL for Python app status checks
     environment:
       - PORT=4000
       - RELAY_PROXY_URL=http://relay-proxy:8030
       - NODE_APP_URL=http://node-app-dev:3000
       - PHP_APP_URL=http://php-app-dev:80
+      - PYTHON_APP_URL=http://python-app-dev:5000
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
     # Volume Mounts:
     # - Docker socket: Required for executing Docker commands (logs, stats)
@@ -233,6 +236,36 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+
+  # ============================================================================
+  # Python Application (SDK Demonstration)
+  # ============================================================================
+  # Purpose: Demonstrates LaunchDarkly Python server-side SDK in Default mode
+  # Port: 5000
+  # Dependencies: None (connects directly to LaunchDarkly)
+  # SDK Mode: Default (direct connection to LaunchDarkly for streaming and events)
+  python:
+    container_name: python-app-dev
+    build:
+      context: ./python
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"  # External:Internal - Python application endpoints
+    # Environment Variables:
+    # - LAUNCHDARKLY_SDK_KEY: LaunchDarkly SDK key (from .env file)
+    # - PORT: HTTP server port (default: 5000)
+    environment:
+      - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
+      - PORT=5000
+    networks:
+      - launchdarkly-network
+    # Health Check: Verifies Python service is responding
+    # Runs every 10 seconds, times out after 3 seconds, retries 3 times
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 # ==============================================================================
 # Networks

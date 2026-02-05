@@ -682,6 +682,14 @@ This application uses a microservices architecture with six specialized containe
 - Port: 3000
 - Purpose: LaunchDarkly Node.js SDK demonstration
 
+**python-app-dev** (Python Application Container):
+- Python 3.11 Alpine
+- Flask web server
+- LaunchDarkly Python SDK v9.7+
+- **Fixed Mode**: Default Mode (Direct Connection)
+- Port: 5000
+- Purpose: LaunchDarkly Python SDK demonstration
+
 **php-app-dev** (PHP Application Container):
 - PHP 8.3-FPM Alpine
 - Nginx web server
@@ -714,6 +722,7 @@ This application uses a microservices architecture with six specialized containe
 | Dashboard | 8000 | Web UI access |
 | API Service | 4000 | API endpoints for status and operations |
 | Node.js App | 3000 | SDK demonstration endpoints |
+| Python App | 5000 | Python SDK demonstration |
 | PHP App | 8080 | PHP SDK demonstration |
 | Relay Proxy | 8030 | LaunchDarkly Relay Proxy |
 | Redis | 6379 | Internal only (no external port) |
@@ -724,7 +733,7 @@ All containers communicate via a custom Docker bridge network (`launchdarkly-net
 
 ### Multi-Language SDK Integration
 
-This demo showcases SDK integration with a shared Redis backend, with each application using a distinct, optimized integration pattern:
+This demo showcases SDK integration across three different languages, each demonstrating a distinct integration pattern:
 
 **Node.js Application** (Proxy Mode only):
 - All SDK traffic goes through the Relay Proxy
@@ -732,16 +741,24 @@ This demo showcases SDK integration with a shared Redis backend, with each appli
 - Sends analytics events through the Relay Proxy
 - Backend API accessible at http://localhost:3000
 
+**Python Application** (Default Mode - Direct Connection):
+- Connects directly to LaunchDarkly for flag updates
+- Receives real-time streaming updates from LaunchDarkly
+- Sends analytics events directly to LaunchDarkly
+- No Relay Proxy or Redis dependency
+- Backend API accessible at http://localhost:5000
+
 **PHP Application** (Daemon Mode only):
 - Reads flags directly from Redis for high-performance evaluation
 - Sends analytics events through the Relay Proxy
 - No direct LaunchDarkly API connections for flag evaluation
 - Backend API accessible at http://localhost:8080
 
-Both applications:
-- Evaluate the same feature flags from the shared Redis store
-- Send analytics events to LaunchDarkly through the Relay Proxy
-- Demonstrate how multiple SDKs in different languages work together in a unified architecture
+All applications:
+- Evaluate the same feature flags
+- Send analytics events to LaunchDarkly
+- Demonstrate how multiple SDKs in different languages work together
+- Display in a unified dashboard with dynamic panel switching
 
 ### API Service Endpoints
 
@@ -783,22 +800,22 @@ The relay proxy uses Redis as a persistent data store for caching feature flag c
 └────────┬────────┘
          │
          ▼
-┌─────────────────┐      ┌─────────────────┐
-│  Node.js App    │      │  PHP App        │
-│  (Relay Proxy   │      │  (Daemon Mode)  │
-│   Mode Only)    │      │  Redis + Events │
-│  (Port 3000)    │      │  (Port 8080)    │
-└────────┬────────┘      └────────┬────────┘
-         │                        │
-         │ All SDK Traffic        │ Direct Read
-         ▼                        ▼
-┌─────────────────┐      ┌─────────────────┐
-│  Relay Proxy    │─────►│  Redis          │
-│  (Port 8030)    │      │  (Port 6379)    │
-└────────┬────────┘      └─────────────────┘
-         │                        │
-         │ Events                 │ Events
-         └────────────────────────┘
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│  Node.js App    │      │  Python App     │      │  PHP App        │
+│  (Relay Proxy   │      │  (Default Mode) │      │  (Daemon Mode)  │
+│   Mode Only)    │      │  Direct Connect │      │  Redis + Events │
+│  (Port 3000)    │      │  (Port 5000)    │      │  (Port 8080)    │
+└────────┬────────┘      └────────┬────────┘      └────────┬────────┘
+         │                        │                        │
+         │ All SDK Traffic        │ Direct                 │ Direct Read
+         ▼                        │ Connection             ▼
+┌─────────────────┐               │               ┌─────────────────┐
+│  Relay Proxy    │───────────────┘               │  Redis          │
+│  (Port 8030)    │─────────────────────────────►│  (Port 6379)    │
+└────────┬────────┘                               └─────────────────┘
+         │                                                 │
+         │ Events                                          │ Events
+         └─────────────────────────────────────────────────┘
                   │
                   ▼
          ┌─────────────────┐
@@ -811,8 +828,9 @@ The relay proxy uses Redis as a persistent data store for caching feature flag c
 - **Dashboard**: Serves static UI, fetches data from API service
 - **API Service**: Centralized gateway for status checks and operations
 - **Node.js**: Single path through Relay Proxy (streaming + events)
+- **Python**: Direct connection to LaunchDarkly (streaming + events)
 - **PHP**: Direct Redis reads for flags, Relay Proxy for events only
-- **Simplified Configuration**: No mode switching logic in either application
+- **Simplified Configuration**: No mode switching logic in any application
 - **Optimized Performance**: Each application uses its ideal integration pattern
 
 **Benefits of This Architecture:**
@@ -1033,7 +1051,7 @@ Health checks can be disabled by removing the `healthcheck` sections from docker
 
 ## SDK Configuration Examples
 
-The Node.js and PHP applications use distinct, optimized integration patterns with LaunchDarkly.
+The Node.js, Python, and PHP applications use distinct, optimized integration patterns with LaunchDarkly.
 
 ### Node.js SDK - Proxy Mode
 
@@ -1056,6 +1074,39 @@ const client = LD.init(sdkKey, {
 - Streaming enabled for real-time flag updates
 - Events are sent through the Relay Proxy to LaunchDarkly
 - Relay Proxy handles caching via Redis internally
+
+### Python SDK - Default Mode (Direct Connection)
+
+The Python application uses the default SDK configuration with direct connection to LaunchDarkly:
+
+```python
+import ldclient
+from ldclient.config import Config
+
+# Create SDK configuration with default settings
+config = Config(sdk_key=sdk_key)
+
+# Initialize the SDK
+ldclient.set_config(config)
+client = ldclient.get()
+
+# Wait for SDK initialization
+if client.is_initialized():
+    print("SDK initialized successfully")
+```
+
+**Key Points**:
+- Connects directly to LaunchDarkly (not through Relay Proxy)
+- Streaming enabled by default for real-time flag updates
+- Events sent directly to LaunchDarkly
+- No Redis or Relay Proxy dependency
+- Simplest configuration - ideal for getting started
+- Demonstrates standard SDK usage pattern
+
+**Default Endpoints**:
+- Streaming: `https://clientstream.launchdarkly.com`
+- Events: `https://events.launchdarkly.com`
+- Polling: `https://app.launchdarkly.com`
 
 ### PHP SDK - Daemon Mode (Redis + Events)
 
@@ -1131,16 +1182,17 @@ docker exec redis redis-cli KEYS "*"
 
 ### Configuration Comparison
 
-| Feature | Node.js (Proxy Mode) | PHP (Daemon Mode) |
-|---------|---------------------------|-------------------|
-| Flag Source | Relay Proxy | Redis Direct |
-| Real-time Updates | Yes (streaming) | Yes (polling every 5s) |
-| Update Mechanism | Push (instant) | Poll (5-second delay) |
-| Analytics Events | Yes | Yes |
-| Network Latency | ~10-50ms | <1ms (Redis read) |
-| LaunchDarkly API Calls | Via Relay Proxy | None (for flags) |
-| Redis Dependency | Optional | Required |
-| Best For | Real-time apps, standard setup | High-throughput, air-gapped |
+| Feature | Node.js (Proxy Mode) | Python (Default Mode) | PHP (Daemon Mode) |
+|---------|---------------------------|----------------------|-------------------|
+| Flag Source | Relay Proxy | LaunchDarkly Direct | Redis Direct |
+| Real-time Updates | Yes (streaming) | Yes (streaming) | Yes (polling every 5s) |
+| Update Mechanism | Push (instant) | Push (instant) | Poll (5-second delay) |
+| Analytics Events | Yes | Yes | Yes |
+| Network Latency | ~10-50ms | ~50-100ms | <1ms (Redis read) |
+| LaunchDarkly API Calls | Via Relay Proxy | Direct | None (for flags) |
+| Redis Dependency | Optional | None | Required |
+| Relay Proxy Dependency | Required | None | Optional (events only) |
+| Best For | Standard setup, caching | Simple setup, getting started | High-throughput, air-gapped |
 
 ## PHP Daemon Mode Integration
 

@@ -944,6 +944,39 @@ app.get('/api/php/container-status', async (req, res) => {
   }
 });
 
+// Python Service container status endpoint (Docker level)
+app.get('/api/python/container-status', async (req, res) => {
+  try {
+    // Check if container is running
+    const { stdout: inspectOutput } = await execPromise('docker inspect -f "{{.State.Running}}" python-app-dev 2>&1');
+    const isRunning = inspectOutput.trim() === 'true';
+    
+    if (!isRunning) {
+      return res.json({
+        connected: false,
+        running: false,
+        status: 'stopped'
+      });
+    }
+    
+    // If running, container is healthy
+    res.json({
+      connected: true,
+      running: true,
+      status: 'healthy'
+    });
+  } catch (error) {
+    logError('/api/python/container-status', error, {
+      command: 'docker inspect python-app-dev'
+    });
+    res.status(500).json({
+      connected: false,
+      running: false,
+      error: error.message
+    });
+  }
+});
+
 // PHP Service start endpoint
 app.post('/api/php/start', async (req, res) => {
   try {
@@ -1004,6 +1037,66 @@ app.post('/api/php/restart', async (req, res) => {
   }
 });
 
+// Python Service start endpoint
+app.post('/api/python/start', async (req, res) => {
+  try {
+    const { stdout } = await execPromise('docker start python-app-dev');
+    res.json({
+      success: true,
+      message: 'Python Service container started successfully',
+      container: stdout.trim()
+    });
+  } catch (error) {
+    logError('/api/python/start', error, {
+      command: 'docker start python-app-dev'
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Python Service stop endpoint
+app.post('/api/python/stop', async (req, res) => {
+  try {
+    const { stdout } = await execPromise('docker stop python-app-dev');
+    res.json({
+      success: true,
+      message: 'Python Service container stopped successfully',
+      container: stdout.trim()
+    });
+  } catch (error) {
+    logError('/api/python/stop', error, {
+      command: 'docker stop python-app-dev'
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Python Service restart endpoint
+app.post('/api/python/restart', async (req, res) => {
+  try {
+    const { stdout } = await execPromise('docker restart python-app-dev');
+    res.json({
+      success: true,
+      message: 'Python Service container restarted successfully',
+      container: stdout.trim()
+    });
+  } catch (error) {
+    logError('/api/python/restart', error, {
+      command: 'docker restart python-app-dev'
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // PHP application status endpoint
 app.get('/api/php/status', async (req, res) => {
   const phpAppUrl = process.env.PHP_APP_URL || 'http://php-app-dev:80';
@@ -1030,10 +1123,260 @@ app.get('/api/php/status', async (req, res) => {
   }
 });
 
+// Python application status endpoint
+app.get('/api/python/status', async (req, res) => {
+  const pythonAppUrl = process.env.PYTHON_APP_URL || 'http://python-app-dev:5000';
+  
+  try {
+    const response = await fetchWithTimeout(
+      `${pythonAppUrl}/api/status`,
+      {},
+      5000
+    );
+    
+    const data = await response.json();
+    
+    // Preserve original status code from Python app
+    res.status(response.status).json(data);
+  } catch (error) {
+    logError('/api/python/status', error, {
+      upstreamUrl: `${pythonAppUrl}/api/status`
+    });
+    res.status(500).json({
+      connected: false,
+      error: 'Unable to connect to Python application'
+    });
+  }
+});
+
+// Python context endpoint (proxy to Python app)
+// GET: Fetch current context
+app.get('/api/python/context', async (req, res) => {
+  const pythonAppUrl = process.env.PYTHON_APP_URL || 'http://python-app-dev:5000';
+  
+  try {
+    const response = await fetchWithTimeout(
+      `${pythonAppUrl}/api/context`,
+      {},
+      5000
+    );
+    
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    logError('/api/python/context (GET)', error, {
+      upstreamUrl: `${pythonAppUrl}/api/context`
+    });
+    res.status(500).json({
+      kind: 'user',
+      key: 'error',
+      anonymous: true,
+      error: 'Unable to connect to Python application'
+    });
+  }
+});
+
+// POST: Update context
+app.post('/api/python/context', express.json(), async (req, res) => {
+  const pythonAppUrl = process.env.PYTHON_APP_URL || 'http://python-app-dev:5000';
+  
+  try {
+    const response = await fetchWithTimeout(
+      `${pythonAppUrl}/api/context`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body)
+      },
+      5000
+    );
+    
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    logError('/api/python/context', error, {
+      upstreamUrl: `${pythonAppUrl}/api/context`
+    });
+    res.status(500).json({
+      success: false,
+      error: 'Unable to connect to Python application'
+    });
+  }
+});
+
+// Python SDK data store endpoint (proxy to Python app)
+app.post('/api/python/sdk-data-store', express.json(), async (req, res) => {
+  const pythonAppUrl = process.env.PYTHON_APP_URL || 'http://python-app-dev:5000';
+  
+  try {
+    const response = await fetchWithTimeout(
+      `${pythonAppUrl}/api/sdk-data-store`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body)
+      },
+      5000
+    );
+    
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    logError('/api/python/sdk-data-store', error, {
+      upstreamUrl: `${pythonAppUrl}/api/sdk-data-store`
+    });
+    res.status(500).json({
+      success: false,
+      error: 'Unable to connect to Python application',
+      flags: {}
+    });
+  }
+});
+
+// Python SSE stream proxy endpoint
+app.get('/api/python/message/stream', async (req, res) => {
+  const pythonUrl = process.env.PYTHON_APP_URL || 'http://python-app-dev:5000';
+  
+  // Get context key from query parameter and forward it
+  const contextKey = req.query.contextKey;
+  const pythonStreamUrl = contextKey 
+    ? `${pythonUrl}/api/message/stream?contextKey=${encodeURIComponent(contextKey)}`
+    : `${pythonUrl}/api/message/stream`;
+  
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  
+  try {
+    // Connect to Python SSE stream with custom User-Agent
+    const response = await fetch(pythonStreamUrl, {
+      headers: {
+        'User-Agent': 'api-service/1.0'
+      }
+    });
+    
+    if (!response.ok) {
+      res.write(`data: ${JSON.stringify({ error: 'Python service unavailable' })}\n\n`);
+      return res.end();
+    }
+    
+    // Stream the response body to the client
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    
+    const pump = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            res.end();
+            break;
+          }
+          
+          // Write chunk to response
+          res.write(value);
+        }
+      } catch (error) {
+        logError('/api/python/message/stream', error, {
+          pythonUrl: `${pythonUrl}/api/message/stream`
+        });
+        res.end();
+      }
+    };
+    
+    pump();
+    
+    // Handle client disconnect
+    req.on('close', () => {
+      reader.cancel();
+    });
+    
+  } catch (error) {
+    logError('/api/python/message/stream', error, {
+      pythonUrl: `${pythonUrl}/api/message/stream`
+    });
+    res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    res.end();
+  }
+});
+
+// Feature flag evaluation endpoint for dashboard panel selection
+// Initialize LaunchDarkly SDK client for flag evaluation
+let dashboardFlagClient = null;
+
+async function initDashboardFlagClient() {
+  if (dashboardFlagClient) {
+    return dashboardFlagClient;
+  }
+
+  const LD = require('@launchdarkly/node-server-sdk');
+  const sdkKey = process.env.LAUNCHDARKLY_SDK_KEY;
+  
+  if (!sdkKey) {
+    throw new Error('LAUNCHDARKLY_SDK_KEY not configured');
+  }
+
+  // Initialize SDK with default configuration (direct connection to LaunchDarkly)
+  dashboardFlagClient = LD.init(sdkKey, {
+    stream: true,
+    sendEvents: false,
+    diagnosticOptOut: true
+  });
+
+  await dashboardFlagClient.waitForInitialization({ timeout: 10 });
+  console.log('[Dashboard Flag Client] SDK initialized successfully');
+  
+  return dashboardFlagClient;
+}
+
+app.get('/api/flag/dashboard-service-panel-1', async (req, res) => {
+  try {
+    // Initialize the SDK client if not already done
+    if (!dashboardFlagClient) {
+      await initDashboardFlagClient();
+    }
+    
+    // Check if SDK is initialized
+    if (!dashboardFlagClient.initialized()) {
+      return res.status(503).json({
+        error: 'SDK not initialized',
+        value: 'node.js'  // Default fallback
+      });
+    }
+    
+    // Create anonymous context for flag evaluation
+    const context = {
+      kind: 'user',
+      key: 'dashboard-user',
+      anonymous: true
+    };
+    
+    // Evaluate the flag
+    const value = await dashboardFlagClient.variation(
+      'dashboard-service-panel-1',
+      context,
+      'node.js'  // Default value
+    );
+    
+    res.json({ value });
+  } catch (error) {
+    logError('/api/flag/dashboard-service-panel-1', error, {
+      message: 'Flag evaluation failed'
+    });
+    res.status(500).json({
+      error: 'Flag evaluation failed',
+      value: 'node.js'  // Default fallback
+    });
+  }
+});
+
 // Container logs endpoint
 app.get('/api/logs/:container', async (req, res) => {
   const { container } = req.params;
-  const allowedContainers = ['node-app-dev', 'php-app-dev', 'relay-proxy', 'redis'];
+  const allowedContainers = ['node-app-dev', 'php-app-dev', 'python-app-dev', 'relay-proxy', 'redis'];
   
   // Validate container name against allowlist
   if (!allowedContainers.includes(container)) {
@@ -1066,7 +1409,7 @@ app.get('/api/logs/:container', async (req, res) => {
 // Clear container logs endpoint
 app.post('/api/logs/:container/clear', async (req, res) => {
   const { container } = req.params;
-  const allowedContainers = ['node-app-dev', 'php-app-dev', 'relay-proxy', 'redis'];
+  const allowedContainers = ['node-app-dev', 'php-app-dev', 'python-app-dev', 'relay-proxy', 'redis'];
   
   // Validate container name against allowlist
   if (!allowedContainers.includes(container)) {
