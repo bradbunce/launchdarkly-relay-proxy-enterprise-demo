@@ -2931,10 +2931,7 @@
         updateTerminalPanel1('node');
       }
       
-      // Initialize Panel 1 log console now that we know which service to use
-      if (window.initializePanel1LogConsole) {
-        window.initializePanel1LogConsole();
-      }
+      // Note: Panel 1 log console will be initialized later after the function is defined
       
       // Update relay proxy status by fetching via backend proxy (CORS workaround)
       async function updateRelayProxyStatus() {
@@ -4545,8 +4542,8 @@
       // Make function globally accessible for flag change handler
       window.initializePanel1LogConsole = initializePanel1LogConsole;
       
-      // Initialize Panel 1 log console (will be called after flag is fetched)
-      // Note: This is called later in the initialization sequence, after panelService is determined
+      // Initialize Panel 1 log console now (on initial page load)
+      initializePanel1LogConsole();
       
       // Create other log console instances (Panel 2, 3, 4)
       phpAppDevConsole = new LogConsole('php-app-dev', 'php-app-dev-output', 'polling');
