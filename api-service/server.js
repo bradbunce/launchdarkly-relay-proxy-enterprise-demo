@@ -1862,22 +1862,34 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
       // Rule doesn't exist, will add it
     }
     
-    // 6. Kill existing TCP connections by pausing and unpausing the container
-    // This breaks the streaming connection without a full restart
-    console.log('Breaking existing streaming connection by pausing container...');
+    // 6. Kill existing TCP connections to LaunchDarkly FIRST before blocking
+    // This ensures the relay proxy doesn't continue receiving updates on existing connections
+    console.log('Killing existing TCP connections to LaunchDarkly...');
     try {
-      // Pause the container to freeze all processes
-      await execPromise('docker pause relay-proxy');
-      console.log('Container paused');
+      // Add REJECT rules for BOTH outbound and inbound traffic to kill existing connections
+      // Outbound: packets FROM the relay proxy TO external hosts
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
+      );
+      // Inbound: packets TO the relay proxy FROM external hosts  
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -d ${containerIP} ! -s ${subnet} -j REJECT --reject-with tcp-reset`
+      );
+      console.log('Added REJECT rules for both directions to send RST packets');
       
-      // Wait a moment
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Wait for RST packets to be sent
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Unpause the container
-      await execPromise('docker unpause relay-proxy');
-      console.log('Container unpaused - streaming connection broken');
-    } catch (pauseError) {
-      console.log('Note: Could not pause/unpause container:', pauseError.message);
+      // Remove both REJECT rules
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
+      );
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -d ${containerIP} ! -s ${subnet} -j REJECT --reject-with tcp-reset`
+      );
+      console.log('Removed REJECT rules');
+    } catch (rstError) {
+      console.log('Note: Could not send RST packets:', rstError.message);
     }
     
     // 7. Add iptables rule to block external traffic
