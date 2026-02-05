@@ -55,6 +55,7 @@ cp .env.example .env
 Required environment variables:
 ```env
 LAUNCHDARKLY_SDK_KEY=sdk-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+LAUNCHDARKLY_CLIENT_SIDE_ID=6980ccadb17af909dd9c4abb
 RELAY_PROXY_CONFIG_KEY=rel-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
@@ -1377,6 +1378,7 @@ curl -X POST http://localhost:8080/api/test-evaluation \
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `LAUNCHDARKLY_SDK_KEY` | Yes | - | Your LaunchDarkly SDK key |
+| `LAUNCHDARKLY_CLIENT_SIDE_ID` | Yes | - | Your LaunchDarkly client-side ID (for dashboard JavaScript SDK) |
 | `RELAY_PROXY_CONFIG_KEY` | Yes | - | Relay Proxy configuration key |
 | `PORT` | No | 3000 | Port for the Express server |
 | `RELAY_PROXY_URL` | No | http://relay-proxy:8030 | URL of the Relay Proxy |
@@ -1391,6 +1393,12 @@ curl -X POST http://localhost:8080/api/test-evaluation \
 2. Navigate to **Account Settings** > **Projects**
 3. Select your project and environment
 4. Copy the SDK key from **"Server-side SDK"** section
+
+**Client-Side ID:**
+1. Log in to https://app.launchdarkly.com
+2. Navigate to **Account Settings** > **Projects**
+3. Select your project and environment
+4. Copy the client-side ID from **"Client-side ID"** section
 
 **Relay Proxy Configuration Key:**
 1. Log in to https://app.launchdarkly.com
@@ -1910,6 +1918,37 @@ The terminal panels will always be visible (fallback to `true`), and you won't b
 4. **Monitor logs** during development
 5. **Test error scenarios** (relay proxy down, invalid keys)
 
+### Local Development Setup
+
+If you're developing locally and need to modify the dashboard or run tests:
+
+**Install Dependencies:**
+```bash
+npm install
+```
+
+This will:
+- Install all Node.js dependencies including the LaunchDarkly JavaScript SDK v3.9.0
+- Run the postinstall script to copy SDK files to `public/vendor/`
+- Copy both `ldclient.min.js` and `ldclient.min.js.map` for browser debugging
+
+**JavaScript SDK Integration:**
+- The dashboard uses the LaunchDarkly JavaScript Client-Side SDK v3.9.0
+- SDK files are served locally from `public/vendor/` (not from CDN)
+- The SDK is loaded as a UMD bundle compatible with all browsers
+- Source maps are included for debugging
+
+**After Making Changes:**
+```bash
+# Rebuild the dashboard container
+docker-compose build --no-cache dashboard
+
+# Restart the dashboard
+docker-compose up -d dashboard
+
+# Hard refresh your browser (Cmd+Shift+R on Mac, Ctrl+Shift+R on Windows/Linux)
+```
+
 ## Security Notes
 
 - `.env` file is gitignored and never committed
@@ -1924,7 +1963,10 @@ MIT License - See LICENSE file for details
 ## Resources
 
 - **LaunchDarkly Docs**: https://docs.launchdarkly.com
-- **Node.js SDK**: https://docs.launchdarkly.com/sdk/server-side/node-js
+- **Node.js Server SDK**: https://docs.launchdarkly.com/sdk/server-side/node-js
+- **JavaScript Client SDK**: https://docs.launchdarkly.com/sdk/client-side/javascript
+- **PHP SDK**: https://docs.launchdarkly.com/sdk/server-side/php
+- **Python SDK**: https://docs.launchdarkly.com/sdk/server-side/python
 - **Relay Proxy**: https://docs.launchdarkly.com/home/relay-proxy
 - **Docker**: https://docs.docker.com
 

@@ -2806,8 +2806,7 @@
             flushInterval: 30000,        // Reduce flush frequency
             diagnosticOptOut: true,      // Disable diagnostic events
             useReport: false,            // Don't use REPORT method
-            evaluationReasons: false,    // Don't fetch reasons
-            withReasons: false           // Don't include reasons in variations
+            evaluationReasons: false     // Don't fetch reasons
           });
           
           // Wait for SDK to be ready
@@ -2917,18 +2916,18 @@
       window.currentPanelService = panelService;
       
       // Initialize Panel 1 based on feature flag - just set the active class
-      const nodePanel = document.getElementById('node-service-panel');
-      const pythonPanel = document.getElementById('python-service-panel');
+      const nodePanelEl = document.getElementById('node-service-panel');
+      const pythonPanelEl = document.getElementById('python-service-panel');
       
       if (panelService === 'python') {
         console.log('[Dashboard] Initializing Python service in Panel 1');
-        nodePanel.classList.remove('active');
-        pythonPanel.classList.add('active');
+        nodePanelEl.classList.remove('active');
+        pythonPanelEl.classList.add('active');
         updateTerminalPanel1('python');
       } else {
         console.log('[Dashboard] Initializing Node.js service in Panel 1 (default)');
-        nodePanel.classList.add('active');
-        pythonPanel.classList.remove('active');
+        nodePanelEl.classList.add('active');
+        pythonPanelEl.classList.remove('active');
         updateTerminalPanel1('node');
       }
       

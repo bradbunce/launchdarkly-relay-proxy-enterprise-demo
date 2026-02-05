@@ -8,7 +8,7 @@
     "dev": "nodemon server.js",
     "test": "jest",
     "load-test": "node load-test.js",
-    "postinstall": "mkdir -p public/vendor && cp node_modules/launchdarkly-js-client-sdk/dist/ldclient.min.js public/vendor/",
+    "postinstall": "mkdir -p public/vendor && cp node_modules/launchdarkly-js-client-sdk/dist/ldclient.min.js public/vendor/ && cp node_modules/launchdarkly-js-client-sdk/dist/ldclient.min.js.map public/vendor/",
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up",
     "docker:down": "docker-compose down"
