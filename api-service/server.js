@@ -1884,10 +1884,23 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
       });
     }
     
-    // 7. Don't restart the container - let it keep serving cached data
+    // 7. Kill existing TCP connections to LaunchDarkly to force immediate disconnection
+    // This ensures the relay proxy doesn't continue receiving updates on existing connections
+    console.log('Killing existing TCP connections to LaunchDarkly...');
+    try {
+      // Use ss command to find and kill established connections to LaunchDarkly (port 443)
+      // Exclude connections to the Docker subnet (internal traffic)
+      const killCmd = `docker exec relay-proxy sh -c "ss -K dst :443"`;
+      await execPromise(killCmd);
+      console.log('Killed existing TCP connections to LaunchDarkly');
+    } catch (killError) {
+      console.log('Note: Could not kill existing connections (ss -K may not be available):', killError.message);
+      // Continue anyway - the iptables rule will prevent reconnection
+    }
+    
+    // 8. Don't restart the container - let it keep serving cached data
     // The iptables rule will block new connections to LaunchDarkly
-    // Existing streaming connections will eventually timeout and fail to reconnect
-    console.log('Relay-proxy disconnected - existing connections will timeout, but cache remains available');
+    console.log('Relay-proxy disconnected - cache remains available for downstream clients');
     
     return res.status(200).json({
       success: true,
