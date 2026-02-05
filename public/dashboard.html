@@ -1174,6 +1174,20 @@
         this.isUpdating = false;
         this.pollingInterval = null;
         
+        // Verify elements exist
+        if (!this.toggle) {
+          console.error('[RelayProxyConnectionControl] Toggle element not found');
+          return;
+        }
+        if (!this.statusText) {
+          console.error('[RelayProxyConnectionControl] Status text element not found');
+          return;
+        }
+        if (!this.errorDiv) {
+          console.error('[RelayProxyConnectionControl] Error div element not found');
+          return;
+        }
+        
         this.init();
       }
       
@@ -1181,8 +1195,10 @@
         // Load initial connection status
         await this.loadConnectionStatus();
         
-        // Set up toggle event listener
-        this.toggle.addEventListener('change', (e) => this.handleToggle(e));
+        // Set up toggle event listener (only if toggle exists)
+        if (this.toggle) {
+          this.toggle.addEventListener('change', (e) => this.handleToggle(e));
+        }
         
         // Poll for status updates every 5 seconds
         this.pollingInterval = setInterval(() => this.loadConnectionStatus(), 5000);
@@ -1242,6 +1258,11 @@
       }
       
       updateUI(connected, containerRunning) {
+        if (!this.toggle || !this.statusText) {
+          console.error('[RelayProxyConnectionControl] Cannot update UI - elements not found');
+          return;
+        }
+        
         if (!containerRunning) {
           this.toggle.disabled = true;
           this.toggle.checked = false;
@@ -1259,12 +1280,16 @@
       }
       
       showError(message) {
-        this.errorDiv.textContent = message;
-        this.errorDiv.style.display = 'block';
+        if (this.errorDiv) {
+          this.errorDiv.textContent = message;
+          this.errorDiv.style.display = 'block';
+        }
       }
       
       hideError() {
-        this.errorDiv.style.display = 'none';
+        if (this.errorDiv) {
+          this.errorDiv.style.display = 'none';
+        }
       }
     }
     
