@@ -6,11 +6,8 @@
   <title>LaunchDarkly Relay Proxy - Unified Dashboard</title>
   <!-- LaunchDarkly Client-Side ID - Injected from environment variable -->
   <meta name="ld-client-id" content="${LAUNCHDARKLY_CLIENT_SIDE_ID}">
-  <!-- LaunchDarkly JavaScript SDK v4 (ES Module from CDN) -->
-  <script type="module">
-    import * as LDClient from 'https://unpkg.com/@launchdarkly/js-client-sdk@4.0.0/dist/index.js';
-    window.LDClient = LDClient;
-  </script>
+  <!-- LaunchDarkly JavaScript SDK v3.9.0 (local) -->
+  <script src="/vendor/ldclient.min.js"></script>
   <style>
     * {
       margin: 0;

@@ -5,10 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LaunchDarkly Test</title>
   <meta name="ld-client-id" content="${LAUNCHDARKLY_CLIENT_SIDE_ID}">
-  <script type="module">
-    import * as LDClient from 'https://unpkg.com/@launchdarkly/js-client-sdk@4.0.0/dist/index.js';
-    window.LDClient = LDClient;
-  </script>
+  <script src="/vendor/ldclient.min.js"></script>
   <style>
     body {
       font-family: Arial, sans-serif;

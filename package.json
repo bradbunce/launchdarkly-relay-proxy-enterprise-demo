@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "test": "jest",
     "load-test": "node load-test.js",
+    "postinstall": "mkdir -p public/vendor && cp node_modules/launchdarkly-js-client-sdk/dist/ldclient.min.js public/vendor/",
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up",
     "docker:down": "docker-compose down"
@@ -24,7 +25,8 @@
     "@launchdarkly/node-server-sdk": "^9.10.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
-    "express-session": "^1.18.1"
+    "express-session": "^1.18.1",
+    "launchdarkly-js-client-sdk": "^3.9.0"
   },
   "devDependencies": {
     "fast-check": "^4.5.3",
