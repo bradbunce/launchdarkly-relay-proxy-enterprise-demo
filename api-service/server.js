@@ -1866,21 +1866,28 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
     // This ensures the relay proxy doesn't continue receiving updates on existing connections
     console.log('Killing existing TCP connections to LaunchDarkly...');
     try {
-      // Add a REJECT rule for ALL external traffic (not just port 443) to send RST packets
-      // This will kill all existing connections to external hosts
+      // Add REJECT rules for BOTH outbound and inbound traffic to kill existing connections
+      // Outbound: packets FROM the relay proxy TO external hosts
       await execPromise(
         `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
       );
-      console.log('Added REJECT rule to send RST packets to all existing external connections');
+      // Inbound: packets TO the relay proxy FROM external hosts  
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -d ${containerIP} ! -s ${subnet} -j REJECT --reject-with tcp-reset`
+      );
+      console.log('Added REJECT rules for both directions to send RST packets');
       
-      // Wait a moment for RST packets to be sent
+      // Wait for RST packets to be sent
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Now remove the REJECT rule
+      // Remove both REJECT rules
       await execPromise(
         `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
       );
-      console.log('Removed REJECT rule');
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -d ${containerIP} ! -s ${subnet} -j REJECT --reject-with tcp-reset`
+      );
+      console.log('Removed REJECT rules');
     } catch (rstError) {
       console.log('Note: Could not send RST packets:', rstError.message);
     }
