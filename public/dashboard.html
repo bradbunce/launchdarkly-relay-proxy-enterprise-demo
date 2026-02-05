@@ -2542,7 +2542,8 @@
       }
       
       // Set up Python context button handler
-      const pythonContextButton = document.getElementById('python-context-button');
+      // Note: Python panel is pre-loaded in HTML, so button already exists
+      const pythonContextButton = document.querySelector('#python-service-panel #python-context-button');
       if (pythonContextButton) {
         pythonContextButton.addEventListener('click', () => {
           pythonPanel.openContextEditor();
@@ -2550,7 +2551,7 @@
       }
       
       // Set up Python test evaluation button handler
-      const pythonTestButton = document.getElementById('python-test-evaluation');
+      const pythonTestButton = document.querySelector('#python-service-panel #python-test-evaluation');
       if (pythonTestButton) {
         pythonTestButton.addEventListener('click', async () => {
           try {
