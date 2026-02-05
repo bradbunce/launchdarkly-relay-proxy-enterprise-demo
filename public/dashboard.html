@@ -2888,10 +2888,25 @@
               console.log('[Dashboard] Showing Python panel');
               nodePanelEl.classList.remove('active');
               pythonPanelEl.classList.add('active');
+              
+              // Connect Python SSE stream if not already connected
+              if (pythonPanel && !pythonPanel.eventSource) {
+                console.log('[Dashboard] Connecting Python SSE stream');
+                setTimeout(() => {
+                  pythonPanel.connectStream();
+                }, 200);
+              }
             } else {
               console.log('[Dashboard] Showing Node panel');
               pythonPanelEl.classList.remove('active');
               nodePanelEl.classList.add('active');
+              
+              // Disconnect Python SSE stream to save resources
+              if (pythonPanel && pythonPanel.eventSource) {
+                console.log('[Dashboard] Disconnecting Python SSE stream');
+                pythonPanel.eventSource.close();
+                pythonPanel.eventSource = null;
+              }
             }
             
             // Update terminal panel labels
