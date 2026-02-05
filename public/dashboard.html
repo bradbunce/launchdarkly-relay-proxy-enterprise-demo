@@ -2542,13 +2542,8 @@
       }
       
       // Set up Python context button handler
-      // Note: Python panel is pre-loaded in HTML, so button already exists
-      const pythonContextButton = document.querySelector('#python-service-panel #python-context-button');
-      if (pythonContextButton) {
-        pythonContextButton.addEventListener('click', () => {
-          pythonPanel.openContextEditor();
-        });
-      }
+      // REMOVED: This is handled in main initialization code now
+      // The Python panel is pre-loaded in HTML, event listener attached there
       
       // Set up Python test evaluation button handler
       const pythonTestButton = document.querySelector('#python-service-panel #python-test-evaluation');
@@ -4627,6 +4622,13 @@
       if (phpContextButton) {
         phpContextButton.addEventListener('click', () => {
           phpPanel.openContextEditor();
+        });
+      }
+      
+      const pythonContextButton = document.getElementById('python-context-button');
+      if (pythonContextButton) {
+        pythonContextButton.addEventListener('click', () => {
+          pythonPanel.openContextEditor();
         });
       }
       
