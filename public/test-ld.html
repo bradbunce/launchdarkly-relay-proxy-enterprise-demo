@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LaunchDarkly Test</title>
+  <meta name="ld-client-id" content="${LAUNCHDARKLY_CLIENT_SIDE_ID}">
+  <script src="/vendor/ldclient.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 40px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .status {
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+      background: #f0f0f0;
+    }
+    .log {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 20px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .log-entry {
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>LaunchDarkly SDK Test</h1>
+  
+  <div class="status">
+    <h2>Current Panel Service</h2>
+    <div id="panel-value" style="font-size: 24px; font-weight: bold;">Loading...</div>
+  </div>
+  
+  <div class="log" id="log"></div>
+  
+  <script>
+    const logEl = document.getElementById('log');
+    const panelValueEl = document.getElementById('panel-value');
+    
+    function log(message) {
+      const timestamp = new Date().toISOString().split('T')[1].slice(0, -1);
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = `[${timestamp}] ${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(message);
+    }
+    
+    // Prevent page reload
+    window.addEventListener('beforeunload', (event) => {
+      log('⚠️ PAGE ATTEMPTING TO RELOAD - BLOCKED');
+      event.preventDefault();
+      event.returnValue = '';
+      return '';
+    });
+    
+    document.addEventListener('DOMContentLoaded', async () => {
+      log('🚀 Page loaded');
+      
+      const clientSideId = document.querySelector('meta[name="ld-client-id"]')?.content;
+      
+      if (!clientSideId) {
+        log('❌ No client-side ID found');
+        return;
+      }
+      
+      log(`📡 Initializing LaunchDarkly SDK with ID: ${clientSideId.substring(0, 10)}...`);
+      
+      try {
+        const ldClient = window.LDClient.initialize(clientSideId, {
+          kind: 'container',
+          key: 'test-dashboard'
+        }, {
+          bootstrap: 'localStorage',
+          streaming: true,
+          sendEvents: false,
+          diagnosticOptOut: true
+        });
+        
+        await ldClient.waitForInitialization();
+        log('✅ SDK initialized');
+        
+        // Test BOTH flags to compare behavior
+        log('--- Testing terminal-panels (boolean) ---');
+        const terminalPanels = ldClient.variation('terminal-panels', true);
+        log(`📊 terminal-panels: ${terminalPanels}`);
+        
+        log('--- Testing dashboard-service-panel-1 (boolean) ---');
+        const showPython = ldClient.variation('dashboard-service-panel-1', false);
+        const displayValue = showPython ? 'python' : 'nodejs';
+        log(`📊 dashboard-service-panel-1: ${showPython} (${displayValue})`);
+        panelValueEl.textContent = displayValue;
+        
+        // Listen for terminal-panels changes
+        ldClient.on('change:terminal-panels', (newValue) => {
+          log(`🔄 terminal-panels CHANGED: ${newValue}`);
+        });
+        
+        // Listen for dashboard-service-panel-1 changes
+        ldClient.on('change:dashboard-service-panel-1', (showPython) => {
+          const displayValue = showPython ? 'python' : 'nodejs';
+          log(`🔄 dashboard-service-panel-1 CHANGED: ${showPython} (${displayValue})`);
+          panelValueEl.textContent = displayValue;
+          panelValueEl.style.color = showPython ? '#4CAF50' : '#2196F3';
+        });
+        
+        log('👂 Listening for flag changes...');
+        
+      } catch (error) {
+        log(`❌ Error: ${error.message}`);
+        console.error(error);
+      }
+    });
+  </script>
+</body>
+</html>
