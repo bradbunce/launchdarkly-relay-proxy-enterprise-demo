@@ -2847,13 +2847,13 @@
           });
           
           // Listen for panel service changes using BOOLEAN flag
-          // Using new flag 'panel-service-toggle' (dashboard-service-panel-1 had config issues)
-          // Flag: panel-service-toggle (boolean)
+          // Flag: dashboard-service-panel-1 (boolean)
           // - true = show Python panel
           // - false = show Node.js panel
-          ldClient.on('change:panel-service-toggle', (showPython) => {
+          // Note: This flag causes page reload when toggled from LaunchDarkly UI (known SDK behavior)
+          ldClient.on('change:dashboard-service-panel-1', (showPython) => {
             console.log('[Dashboard] ===== FLAG CHANGE DETECTED =====');
-            console.log('[Dashboard] panel-service-toggle changed to:', showPython);
+            console.log('[Dashboard] dashboard-service-panel-1 changed to:', showPython);
             
             // Determine which service to show
             const newService = showPython ? 'python' : 'node';
