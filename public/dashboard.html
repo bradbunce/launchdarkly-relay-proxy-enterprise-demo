@@ -2889,6 +2889,15 @@
               nodePanelEl.classList.add('active');
             }
             
+            // Update terminal panel labels
+            updateTerminalPanel1(newService);
+            
+            // Reinitialize Panel 1 log console to connect to the correct service
+            if (window.initializePanel1LogConsole) {
+              console.log('[Dashboard] Reinitializing Panel 1 log console for service change');
+              window.initializePanel1LogConsole();
+            }
+            
             console.log('[Dashboard] ===== FLAG CHANGE COMPLETE =====');
           });
           
@@ -2929,6 +2938,11 @@
         nodePanelEl.classList.add('active');
         pythonPanelEl.classList.remove('active');
         updateTerminalPanel1('node');
+      }
+      
+      // Initialize Panel 1 log console now that we know which service to use
+      if (window.initializePanel1LogConsole) {
+        window.initializePanel1LogConsole();
       }
       
       // Update relay proxy status by fetching via backend proxy (CORS workaround)
@@ -4503,17 +4517,52 @@
       phpPanel.startStatusPolling();
       pythonPanel.startStatusPolling();
       
-      // Create log console instances - Panel 1 is dynamic based on flag
-      const panel1ContainerName = window.currentPanelService === 'python' ? 'python-app-dev' : 'node-app-dev';
-      const panel1OutputId = window.currentPanelService === 'python' ? 'python-app-dev-output' : 'node-app-dev-output';
+      // Function to initialize/reinitialize Panel 1 log console based on current service
+      function initializePanel1LogConsole() {
+        console.log('[Dashboard] Initializing Panel 1 log console for:', window.currentPanelService);
+        
+        // Stop and clean up existing console if it exists
+        if (appDevConsole) {
+          appDevConsole.stop();
+        }
+        
+        // Determine container and output IDs based on current service
+        const panel1ContainerName = window.currentPanelService === 'python' ? 'python-app-dev' : 'node-app-dev';
+        const panel1OutputId = window.currentPanelService === 'python' ? 'python-app-dev-output' : 'node-app-dev-output';
+        
+        // Create new log console for Panel 1
+        appDevConsole = new LogConsole(panel1ContainerName, panel1OutputId, 'polling');
+        appDevConsole.start();
+        
+        // Set up clear button handler for Panel 1
+        const panel1ClearBtnId = window.currentPanelService === 'python' ? 'python-app-dev-clear' : 'node-app-dev-clear';
+        const appDevClearBtn = document.getElementById(panel1ClearBtnId);
+        if (appDevClearBtn) {
+          // Remove old event listener by cloning the button
+          const newBtn = appDevClearBtn.cloneNode(true);
+          appDevClearBtn.parentNode.replaceChild(newBtn, appDevClearBtn);
+          
+          // Add new event listener
+          newBtn.addEventListener('click', () => {
+            appDevConsole.clear();
+          });
+        }
+        
+        console.log('[Dashboard] Panel 1 log console initialized');
+      }
       
-      appDevConsole = new LogConsole(panel1ContainerName, panel1OutputId, 'polling');
+      // Make function globally accessible for flag change handler
+      window.initializePanel1LogConsole = initializePanel1LogConsole;
+      
+      // Initialize Panel 1 log console (will be called after flag is fetched)
+      // Note: This is called later in the initialization sequence, after panelService is determined
+      
+      // Create other log console instances (Panel 2, 3, 4)
       phpAppDevConsole = new LogConsole('php-app-dev', 'php-app-dev-output', 'polling');
       relayProxyConsole = new LogConsole('relay-proxy', 'relay-proxy-output', 'polling');
       redisMonitorConsole = new LogConsole('redis', 'redis-monitor-output', 'sse');
       
-      // Start all log consoles
-      appDevConsole.start();
+      // Start other log consoles
       phpAppDevConsole.start();
       relayProxyConsole.start();
       redisMonitorConsole.start();
@@ -4523,15 +4572,7 @@
       const relayProxyConnectionControl = new RelayProxyConnectionControl();
       console.log('[Dashboard] Relay proxy connection control initialized');
       
-      // Set up clear button handlers - Panel 1 is dynamic
-      const panel1ClearBtnId = window.currentPanelService === 'python' ? 'python-app-dev-clear' : 'node-app-dev-clear';
-      const appDevClearBtn = document.getElementById(panel1ClearBtnId);
-      if (appDevClearBtn) {
-        appDevClearBtn.addEventListener('click', () => {
-          appDevConsole.clear();
-        });
-      }
-      
+      // Set up clear button handlers for other panels
       const phpAppDevClearBtn = document.getElementById('php-app-dev-clear');
       if (phpAppDevClearBtn) {
         phpAppDevClearBtn.addEventListener('click', () => {
