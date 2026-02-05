@@ -2226,9 +2226,14 @@
     // Update terminal panel 1 to show the correct service logs
     // Requirements: 2.5, 2.6
     function updateTerminalPanel1(serviceType) {
-      const consoleElement = document.getElementById('node-app-dev-console');
+      // Try to find the console element by either possible ID
+      let consoleElement = document.getElementById('node-app-dev-console');
       if (!consoleElement) {
-        console.error('Terminal panel 1 not found');
+        consoleElement = document.getElementById('python-app-dev-console');
+      }
+      
+      if (!consoleElement) {
+        console.error('Terminal panel 1 not found (tried both node-app-dev-console and python-app-dev-console)');
         return;
       }
       
