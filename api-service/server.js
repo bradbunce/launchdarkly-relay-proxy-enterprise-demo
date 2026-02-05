@@ -1862,34 +1862,37 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
       // Rule doesn't exist, will add it
     }
     
-    // 6. Kill existing TCP connections to LaunchDarkly FIRST before blocking
-    // This ensures the relay proxy doesn't continue receiving updates on existing connections
+    // 6. Kill existing TCP connections using conntrack on the Docker host
+    // This deletes the connection tracking entry, forcing the kernel to RST the connection
     console.log('Killing existing TCP connections to LaunchDarkly...');
     try {
-      // Add REJECT rules for BOTH outbound and inbound traffic to kill existing connections
-      // Outbound: packets FROM the relay proxy TO external hosts
-      await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
-      );
-      // Inbound: packets TO the relay proxy FROM external hosts  
-      await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -d ${containerIP} ! -s ${subnet} -j REJECT --reject-with tcp-reset`
-      );
-      console.log('Added REJECT rules for both directions to send RST packets');
+      // Use a Debian-based container with conntrack pre-installed
+      // Delete all connection tracking entries for the relay proxy container
+      const killCmd = `docker run --rm --privileged --net=host --pid=host debian:stable-slim sh -c "apt-get update -qq && apt-get install -y -qq conntrack > /dev/null 2>&1 && nsenter -t 1 -m -u -n -i conntrack -D -s ${containerIP}"`;
+      await execPromise(killCmd);
+      console.log('Killed existing TCP connections using conntrack');
+    } catch (conntrackError) {
+      console.log('Note: Could not kill connections with conntrack:', conntrackError.message);
       
-      // Wait for RST packets to be sent
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Remove both REJECT rules
-      await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
-      );
-      await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -d ${containerIP} ! -s ${subnet} -j REJECT --reject-with tcp-reset`
-      );
-      console.log('Removed REJECT rules');
-    } catch (rstError) {
-      console.log('Note: Could not send RST packets:', rstError.message);
+      // Fallback: Try REJECT rules to send RST packets
+      try {
+        await execPromise(
+          `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
+        );
+        await execPromise(
+          `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -d ${containerIP} ! -s ${subnet} -j REJECT --reject-with tcp-reset`
+        );
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await execPromise(
+          `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
+        );
+        await execPromise(
+          `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -d ${containerIP} ! -s ${subnet} -j REJECT --reject-with tcp-reset`
+        );
+        console.log('Sent RST packets as fallback');
+      } catch (rstError) {
+        console.log('Note: Could not send RST packets:', rstError.message);
+      }
     }
     
     // 7. Add iptables rule to block external traffic
