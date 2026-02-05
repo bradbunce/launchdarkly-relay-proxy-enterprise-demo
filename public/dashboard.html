@@ -2546,33 +2546,8 @@
       // The Python panel is pre-loaded in HTML, event listener attached there
       
       // Set up Python test evaluation button handler
-      const pythonTestButton = document.querySelector('#python-service-panel #python-test-evaluation');
-      if (pythonTestButton) {
-        pythonTestButton.addEventListener('click', async () => {
-          try {
-            const response = await fetch('http://localhost:5000/api/flag');
-            const data = await response.json();
-            
-            let contextDetails = `Type: ${data.context?.kind || 'anonymous'}\n`;
-            contextDetails += `Key: ${data.context?.key || 'unknown'}\n`;
-            if (data.context?.name) contextDetails += `Name: ${data.context.name}\n`;
-            if (data.context?.email) contextDetails += `Email: ${data.context.email}\n`;
-            if (data.context?.location) contextDetails += `Location: ${data.context.location}\n`;
-            
-            let hashDetails = '';
-            if (data.hashInfo) {
-              hashDetails = `\n\nHash Info:\n`;
-              hashDetails += `Hash Value: ${data.hashInfo.hashValue}\n`;
-              hashDetails += `Bucket Value: ${data.hashInfo.bucketValue}\n`;
-              hashDetails += `Salt: ${data.hashInfo.salt}`;
-            }
-            
-            alert(`Test Evaluation Complete!\n\nFlag Value: ${data.value}\n\nContext:\n${contextDetails}${hashDetails}\n\nCheck the python-app-dev logs for detailed output.`);
-          } catch (error) {
-            alert(`Error testing flag evaluation: ${error.message}`);
-          }
-        });
-      }
+      // REMOVED: This is handled in main initialization code now
+      
     }
     
     // Fetch Python service status
@@ -4813,6 +4788,41 @@
           } finally {
             nodeTestButton.disabled = false;
             nodeTestButton.textContent = 'Test Flag Evaluation';
+          }
+        });
+      }
+      
+      // Python Test Evaluation button
+      const pythonTestButton = document.getElementById('python-test-evaluation');
+      if (pythonTestButton) {
+        pythonTestButton.addEventListener('click', async () => {
+          pythonTestButton.disabled = true;
+          pythonTestButton.textContent = 'Testing...';
+          
+          try {
+            const response = await fetch('http://localhost:5000/api/flag');
+            const data = await response.json();
+            
+            let contextDetails = `Type: ${data.context?.kind || 'anonymous'}\n`;
+            contextDetails += `Key: ${data.context?.key || 'unknown'}\n`;
+            if (data.context?.name) contextDetails += `Name: ${data.context.name}\n`;
+            if (data.context?.email) contextDetails += `Email: ${data.context.email}\n`;
+            if (data.context?.location) contextDetails += `Location: ${data.context.location}\n`;
+            
+            let hashDetails = '';
+            if (data.hashInfo) {
+              hashDetails = `\n\nHash Info:\n`;
+              hashDetails += `Hash Value: ${data.hashInfo.hashValue}\n`;
+              hashDetails += `Bucket Value: ${data.hashInfo.bucketValue}\n`;
+              hashDetails += `Salt: ${data.hashInfo.salt}`;
+            }
+            
+            alert(`Test Evaluation Complete!\n\nFlag Value: ${data.value}\n\nContext:\n${contextDetails}${hashDetails}\n\nCheck the python-app-dev logs for detailed output.`);
+          } catch (error) {
+            alert(`Error testing flag evaluation: ${error.message}`);
+          } finally {
+            pythonTestButton.disabled = false;
+            pythonTestButton.textContent = 'Test Flag Evaluation';
           }
         });
       }
