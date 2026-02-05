@@ -1866,9 +1866,9 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
     // This deletes the connection tracking entry, forcing the kernel to RST the connection
     console.log('Killing existing TCP connections to LaunchDarkly...');
     try {
-      // Use a Debian-based container with conntrack pre-installed
-      // Delete all connection tracking entries for the relay proxy container
-      const killCmd = `docker run --rm --privileged --net=host --pid=host debian:stable-slim sh -c "apt-get update -qq && apt-get install -y -qq conntrack > /dev/null 2>&1 && nsenter -t 1 -m -u -n -i conntrack -D -s ${containerIP}"`;
+      // Use conntrack from the API service container (which has conntrack-tools installed)
+      // Access the Docker host's network namespace via nsenter
+      const killCmd = `docker exec api-service nsenter -t 1 -m -u -n -i conntrack -D -s ${containerIP}`;
       await execPromise(killCmd);
       console.log('Killed existing TCP connections using conntrack');
     } catch (conntrackError) {
