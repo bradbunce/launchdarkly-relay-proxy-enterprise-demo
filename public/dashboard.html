@@ -2975,24 +2975,45 @@
           const stopButton = document.getElementById('relay-proxy-stop-button');
           const restartButton = document.getElementById('relay-proxy-restart-button');
           
-          // Check if Redis is available
-          if (data.redisAvailable === false) {
-            // Redis is down - show degraded status
+          // Check for degraded status and determine specific issues
+          if (data.status === 'degraded' || data.redisAvailable === false) {
+            // Determine what's degraded
+            const redisDown = data.redisAvailable === false;
+            let hasStreamIssue = false;
+            
+            // Check if it's a LaunchDarkly connection issue by examining environment statuses
+            if (data.environments) {
+              Object.values(data.environments).forEach(env => {
+                if (env.status === 'disconnected' || 
+                    (env.connectionStatus && env.connectionStatus.state === 'INTERRUPTED') ||
+                    (env.connectionStatus && env.connectionStatus.state === 'OFF')) {
+                  hasStreamIssue = true;
+                }
+              });
+            }
+            
+            // Build status message based on what's degraded
             updatePillStatus('relay-proxy', 'degraded');
-            statusText.textContent = `Degraded - Redis Unavailable${data.version ? ' - v' + data.version : ''}`;
+            let statusMessage = 'Degraded';
+            
+            if (redisDown && hasStreamIssue) {
+              // Both Redis and LaunchDarkly are down
+              statusMessage = 'Degraded - Redis & LaunchDarkly Unavailable';
+            } else if (redisDown) {
+              // Only Redis is down
+              statusMessage = 'Degraded - Redis Unavailable';
+            } else if (hasStreamIssue) {
+              // Only LaunchDarkly connection is down
+              statusMessage = 'Degraded - LaunchDarkly Connection Issue';
+            } else {
+              // Generic degraded state
+              statusMessage = 'Degraded - Serving Cached Data';
+            }
+            
+            statusText.textContent = `${statusMessage}${data.version ? ' - v' + data.version : ''}`;
             statusText.style.color = '#ff9800';
             
             // Show stop and restart buttons (Relay Proxy is running but degraded)
-            if (startButton) startButton.style.display = 'none';
-            if (stopButton) stopButton.style.display = 'flex';
-            if (restartButton) restartButton.style.display = 'flex';
-          } else if (data.status === 'degraded') {
-            // Other degraded state
-            updatePillStatus('relay-proxy', 'degraded');
-            statusText.textContent = `Degraded${data.version ? ' - v' + data.version : ''}`;
-            statusText.style.color = '#ff9800';
-            
-            // Show stop and restart buttons
             if (startButton) startButton.style.display = 'none';
             if (stopButton) stopButton.style.display = 'flex';
             if (restartButton) restartButton.style.display = 'flex';

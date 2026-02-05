@@ -233,6 +233,22 @@ This delay exists because we cannot restart the container while disconnected (se
 3. **Flag Update Lag**: Disconnect, change flags in LaunchDarkly, reconnect, and observe synchronization
 4. **Cache Validation**: Confirm that Redis cache provides continuity during network issues
 
+**Status Messages:**
+
+The Relay Proxy status display shows specific messages to clearly explain what's degraded:
+
+- **"Connected"**: Relay Proxy is healthy, connected to both LaunchDarkly and Redis
+- **"Degraded - LaunchDarkly Connection Issue"**: Streaming connection to LaunchDarkly is interrupted, but Redis is available (serving cached data)
+- **"Degraded - Redis Unavailable"**: Redis is down, but LaunchDarkly connection is active (limited caching)
+- **"Degraded - Redis & LaunchDarkly Unavailable"**: Both Redis and LaunchDarkly connections are down (critical state)
+- **"Degraded - Serving Cached Data"**: Generic degraded state (other issues detected)
+
+The dashboard automatically detects the specific cause of degradation by examining:
+- Redis connectivity (via ping check)
+- Environment connection status (INTERRUPTED, OFF, or disconnected states)
+
+This helps you quickly identify whether the issue is with LaunchDarkly connectivity, Redis availability, or both.
+
 **Technical Details:**
 - Uses iptables FORWARD chain rules to block traffic
 - Blocks traffic to LaunchDarkly domains: `clientstream.launchdarkly.com`, `app.launchdarkly.com`, `events.launchdarkly.com`
