@@ -1862,11 +1862,33 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
       // Rule doesn't exist, will add it
     }
     
-    // 6. Add iptables rule to block external traffic
+    // 6. Kill existing TCP connections to LaunchDarkly FIRST before blocking
+    // This ensures the relay proxy doesn't continue receiving updates on existing connections
+    console.log('Killing existing TCP connections to LaunchDarkly...');
+    try {
+      // Add a REJECT rule that will send RST packets to kill existing connections
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -s ${containerIP} -p tcp --dport 443 -j REJECT --reject-with tcp-reset`
+      );
+      console.log('Added REJECT rule to send RST packets to existing connections');
+      
+      // Wait a moment for RST packets to be sent
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Now remove the REJECT rule
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} -p tcp --dport 443 -j REJECT --reject-with tcp-reset`
+      );
+      console.log('Removed REJECT rule');
+    } catch (rstError) {
+      console.log('Note: Could not send RST packets:', rstError.message);
+    }
+    
+    // 7. Add iptables rule to block external traffic
     // We need to use docker exec to run iptables on the Docker host (VM on macOS)
     // This is the only way to actually block traffic on Docker Desktop
     try {
-      // First, try to remove any existing rule
+      // First, try to remove any existing DROP rule
       await execPromise(
         `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>/dev/null || true`
       );
@@ -1882,29 +1904,6 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
         success: false,
         error: `Failed to add iptables rule: ${error.message}`
       });
-    }
-    
-    // 7. Kill existing TCP connections to LaunchDarkly to force immediate disconnection
-    // This ensures the relay proxy doesn't continue receiving updates on existing connections
-    console.log('Killing existing TCP connections to LaunchDarkly...');
-    try {
-      // First, add a REJECT rule that will send RST packets to kill existing connections
-      // This must be done BEFORE the DROP rule
-      await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -s ${containerIP} -p tcp --dport 443 -j REJECT --reject-with tcp-reset`
-      );
-      console.log('Added REJECT rule to send RST packets to existing connections');
-      
-      // Wait a moment for RST packets to be sent
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Now remove the REJECT rule and keep only the DROP rule
-      await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} -p tcp --dport 443 -j REJECT --reject-with tcp-reset`
-      );
-      console.log('Removed REJECT rule, DROP rule remains in place');
-    } catch (rstError) {
-      console.log('Note: Could not send RST packets:', rstError.message);
     }
     
     // 8. Don't restart the container - let it keep serving cached data
