@@ -1866,18 +1866,19 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
     // This ensures the relay proxy doesn't continue receiving updates on existing connections
     console.log('Killing existing TCP connections to LaunchDarkly...');
     try {
-      // Add a REJECT rule that will send RST packets to kill existing connections
+      // Add a REJECT rule for ALL external traffic (not just port 443) to send RST packets
+      // This will kill all existing connections to external hosts
       await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -s ${containerIP} -p tcp --dport 443 -j REJECT --reject-with tcp-reset`
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
       );
-      console.log('Added REJECT rule to send RST packets to existing connections');
+      console.log('Added REJECT rule to send RST packets to all existing external connections');
       
       // Wait a moment for RST packets to be sent
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
       // Now remove the REJECT rule
       await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} -p tcp --dport 443 -j REJECT --reject-with tcp-reset`
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
       );
       console.log('Removed REJECT rule');
     } catch (rstError) {
