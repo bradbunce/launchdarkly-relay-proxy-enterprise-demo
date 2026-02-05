@@ -211,6 +211,14 @@ The dashboard includes a connection toggle that allows you to simulate network d
 - No new flag updates are received from LaunchDarkly
 - Internal Docker network connectivity (Redis access) is preserved
 - Dashboard continues to display cached flag data
+- Relay Proxy uses **exponential backoff** when attempting to reconnect (starts at ~3 seconds, increases to 60+ seconds)
+
+**Important - Reconnection Delay:**
+When you toggle from "Disconnected" to "Connected", the Relay Proxy will **not reconnect immediately**. It will reconnect on its next scheduled retry attempt, which could be:
+- **3-10 seconds** if disconnected briefly
+- **30-60+ seconds** if disconnected for several minutes (due to exponential backoff)
+
+This delay exists because we cannot restart the container while disconnected (see "Why We Can't Restart During Disconnection" below).
 
 **Testing Scenarios:**
 1. **Resilience Testing**: Verify your application continues to function with cached flags
@@ -241,18 +249,37 @@ This demo uses the Relay Proxy's **auto-configuration mode** (`AUTO_CONFIG_KEY`)
 3. Each SDK client reads from Redis (if available) and streams updates from LaunchDarkly
 4. The Relay Proxy serves flag data to downstream SDK clients
 
-**Critical Limitation - Relay Proxy Restart While Disconnected:**
+**Critical Limitation - Why We Can't Restart During Disconnection:**
 
-If the Relay Proxy is **restarted** while disconnected from LaunchDarkly:
-- ❌ The Relay Proxy **cannot initialize** because it needs auto-config from LaunchDarkly
-- ❌ It will continuously retry connecting to LaunchDarkly and remain in a degraded state
-- ❌ SDK clients in **Proxy Mode** (Node.js) cannot evaluate flags because the Relay Proxy isn't serving
-- ✅ SDK clients in **Daemon Mode** (PHP) **can still evaluate flags** by reading directly from Redis
+The disconnect feature uses iptables rules to block network traffic **without restarting the container**. This is intentional because:
+
+**Auto-Config Mode Dependency:**
+- This demo uses **auto-config mode** for easy setup (single `RELAY_PROXY_CONFIG_KEY` environment variable)
+- In auto-config mode, the Relay Proxy **must connect to LaunchDarkly on startup** to download its configuration
+- The configuration tells the Relay Proxy which environments to serve and that it should use Redis as a data store
+
+**What Happens If We Restart While Disconnected:**
+1. ❌ Relay Proxy starts but **cannot reach LaunchDarkly** (network is blocked)
+2. ❌ Cannot download auto-config (which includes Redis configuration)
+3. ❌ **Doesn't know to read from Redis** - ends up with an empty cache
+4. ❌ Cannot serve any flag data to downstream clients
+5. ❌ Remains in degraded state until network is restored
 
 **Why This Happens:**
 - Auto-config mode requires LaunchDarkly connectivity on startup to discover which environments to initialize
 - The Relay Proxy doesn't persist auto-config data to disk for offline restarts
 - Without environment configuration, the Relay Proxy doesn't know which Redis keys to read
+
+**Alternative - Manual Configuration:**
+If the Relay Proxy were manually configured with Redis settings (instead of auto-config), it would:
+- ✅ Read configuration from environment variables on startup
+- ✅ **Immediately connect to Redis** and load cached flags
+- ✅ Serve cached data even while disconnected from LaunchDarkly
+- ✅ Support instant reconnection via container restart
+
+**Trade-off:**
+- **Auto-config mode** (this demo): Easy setup, but reconnection has exponential backoff delay (3-60+ seconds)
+- **Manual config mode**: More complex setup, but supports instant reconnection via restart
 
 **Recommended Usage:**
 - ✅ **Disconnect without restart**: Relay Proxy continues serving from cache and Redis (works perfectly)
