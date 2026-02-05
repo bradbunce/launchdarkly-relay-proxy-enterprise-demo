@@ -213,6 +213,13 @@ The dashboard includes a connection toggle that allows you to simulate network d
 - Dashboard continues to display cached flag data
 - Relay Proxy uses **exponential backoff** when attempting to reconnect (starts at ~3 seconds, increases to 60+ seconds)
 
+**Important - Disconnection Delay:**
+When you toggle "Disconnect", the iptables rule is applied immediately, but the **existing streaming connection takes 30 seconds to 2 minutes to fully shut down**. This is normal TCP behavior:
+- The iptables DROP rule blocks new connections immediately
+- The existing streaming connection remains alive until it detects the network is down
+- TCP keepalive and application-level timeouts cause the connection to eventually fail
+- You'll see timeout errors in the Relay Proxy logs after 30-120 seconds
+
 **Important - Reconnection Delay:**
 When you toggle from "Disconnected" to "Connected", the Relay Proxy will **not reconnect immediately**. It will reconnect on its next scheduled retry attempt, which could be:
 - **3-10 seconds** if disconnected briefly
