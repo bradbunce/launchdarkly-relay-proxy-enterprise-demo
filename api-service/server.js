@@ -1888,25 +1888,23 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
     // This ensures the relay proxy doesn't continue receiving updates on existing connections
     console.log('Killing existing TCP connections to LaunchDarkly...');
     try {
-      // Use conntrack on the Docker host to kill established connections from the relay proxy container
-      // This works by deleting the connection tracking entry, which causes the kernel to RST the connection
-      const killCmd = `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i conntrack -D -s ${containerIP} -p tcp --dport 443`;
-      await execPromise(killCmd);
-      console.log('Killed existing TCP connections to LaunchDarkly using conntrack');
-    } catch (killError) {
-      console.log('Note: Could not kill existing connections with conntrack:', killError.message);
+      // First, add a REJECT rule that will send RST packets to kill existing connections
+      // This must be done BEFORE the DROP rule
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -s ${containerIP} -p tcp --dport 443 -j REJECT --reject-with tcp-reset`
+      );
+      console.log('Added REJECT rule to send RST packets to existing connections');
       
-      // Fallback: Try to kill the relay proxy process to force connection closure
-      try {
-        const processKillCmd = `docker exec relay-proxy sh -c "pkill -9 ld-relay || kill -9 1"`;
-        await execPromise(processKillCmd);
-        console.log('Killed relay proxy process as fallback');
-        
-        // Wait for process to restart
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      } catch (processKillError) {
-        console.log('Note: Could not kill relay proxy process:', processKillError.message);
-      }
+      // Wait a moment for RST packets to be sent
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Now remove the REJECT rule and keep only the DROP rule
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} -p tcp --dport 443 -j REJECT --reject-with tcp-reset`
+      );
+      console.log('Removed REJECT rule, DROP rule remains in place');
+    } catch (rstError) {
+      console.log('Note: Could not send RST packets:', rstError.message);
     }
     
     // 8. Don't restart the container - let it keep serving cached data
