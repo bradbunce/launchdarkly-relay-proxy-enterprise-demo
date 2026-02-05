@@ -1888,13 +1888,16 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
     // This ensures the relay proxy doesn't continue receiving updates on existing connections
     console.log('Killing existing TCP connections to LaunchDarkly...');
     try {
-      // Use ss command to find and kill established connections to LaunchDarkly (port 443)
-      // Exclude connections to the Docker subnet (internal traffic)
-      const killCmd = `docker exec relay-proxy sh -c "ss -K dst :443"`;
+      // Find and kill the relay proxy Go process to force connection closure
+      // The process will restart automatically (supervised by Docker), but won't reconnect due to iptables
+      const killCmd = `docker exec relay-proxy sh -c "pkill -9 ld-relay || kill -9 1"`;
       await execPromise(killCmd);
-      console.log('Killed existing TCP connections to LaunchDarkly');
+      console.log('Killed relay proxy process to force connection closure');
+      
+      // Wait a moment for the process to restart
+      await new Promise(resolve => setTimeout(resolve, 2000));
     } catch (killError) {
-      console.log('Note: Could not kill existing connections (ss -K may not be available):', killError.message);
+      console.log('Note: Could not kill relay proxy process:', killError.message);
       // Continue anyway - the iptables rule will prevent reconnection
     }
     
