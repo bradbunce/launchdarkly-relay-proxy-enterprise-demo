@@ -9,6 +9,7 @@ COPY public/*.js /usr/share/nginx/html/
 COPY public/*.svg /usr/share/nginx/html/
 COPY public/*.png /usr/share/nginx/html/
 COPY public/index.html /usr/share/nginx/html/
+COPY public/vendor/ /usr/share/nginx/html/vendor/
 
 # Copy nginx configuration
 COPY dashboard/nginx.conf /etc/nginx/conf.d/default.conf
