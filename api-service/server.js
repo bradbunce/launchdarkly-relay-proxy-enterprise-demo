@@ -1,3 +1,77 @@
+// Connection timing tracking
+let disconnectTimestamp = null;
+let reconnectTimestamp = null;
+let monitoringInterval = null;
+
+// Helper function to monitor Relay Proxy connection state changes
+async function monitorRelayProxyConnectionState(action, startTime) {
+  const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
+  let lastState = null;
+  let checkCount = 0;
+  const maxChecks = action === 'disconnect' ? 60 : 120; // 2 minutes for disconnect, 4 minutes for reconnect
+
+  return new Promise((resolve) => {
+    const interval = setInterval(async () => {
+      checkCount++;
+
+      try {
+        const response = await fetchWithTimeout(`${relayProxyUrl}/status`, {}, 3000);
+        const data = await response.json();
+
+        // Check environment connection state
+        let currentState = 'unknown';
+        if (data.environments) {
+          const envKeys = Object.keys(data.environments);
+          if (envKeys.length > 0) {
+            const env = data.environments[envKeys[0]];
+            if (env.connectionStatus) {
+              currentState = env.connectionStatus.state;
+            }
+          }
+        }
+
+        // Detect state change
+        if (lastState && lastState !== currentState) {
+          const elapsed = Date.now() - startTime;
+
+          if (action === 'disconnect' && currentState === 'INTERRUPTED') {
+            console.log(`[TIMING] Relay Proxy detected disconnection after ${(elapsed / 1000).toFixed(2)} seconds`);
+            console.log(`[TIMING] State changed from ${lastState} to ${currentState}`);
+            clearInterval(interval);
+            resolve({ detected: true, elapsed, state: currentState });
+            return;
+          } else if (action === 'reconnect' && currentState === 'VALID') {
+            console.log(`[TIMING] Relay Proxy successfully reconnected after ${(elapsed / 1000).toFixed(2)} seconds`);
+            console.log(`[TIMING] State changed from ${lastState} to ${currentState}`);
+            clearInterval(interval);
+            resolve({ detected: true, elapsed, state: currentState });
+            return;
+          }
+        }
+
+        lastState = currentState;
+
+        // Timeout after max checks
+        if (checkCount >= maxChecks) {
+          const elapsed = Date.now() - startTime;
+          console.log(`[TIMING] Monitoring timeout after ${(elapsed / 1000).toFixed(2)} seconds. Last state: ${currentState}`);
+          clearInterval(interval);
+          resolve({ detected: false, elapsed, state: currentState, timeout: true });
+        }
+      } catch (error) {
+        // Connection errors are expected during disconnect
+        if (action === 'disconnect' && checkCount > 5) {
+          // If we can't reach the status endpoint after a few checks, connection is likely down
+          const elapsed = Date.now() - startTime;
+          console.log(`[TIMING] Relay Proxy status endpoint unreachable after ${(elapsed / 1000).toFixed(2)} seconds (connection likely down)`);
+          clearInterval(interval);
+          resolve({ detected: true, elapsed, state: 'unreachable' });
+        }
+      }
+    }, 2000); // Check every 2 seconds
+  });
+}
+
 const express = require('express');
 const cors = require('cors');
 const { exec } = require('child_process');
@@ -1852,6 +1926,9 @@ async function getDockerNetworkSubnet(networkName) {
 // Relay Proxy disconnect endpoint
 app.post('/api/relay-proxy/disconnect', async (req, res) => {
   try {
+    const disconnectStartTime = Date.now();
+    console.log(`[TIMING] Disconnect initiated at ${new Date(disconnectStartTime).toISOString()}`);
+    
     // 1. Check if container is running
     const isRunning = await checkContainerRunning('relay-proxy');
     if (!isRunning) {
@@ -1946,12 +2023,32 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
     // The iptables rule will block new connections to LaunchDarkly
     console.log('Relay-proxy disconnected - cache remains available for downstream clients');
     
+    const iptablesAppliedTime = Date.now();
+    const iptablesElapsed = iptablesAppliedTime - disconnectStartTime;
+    console.log(`[TIMING] iptables rule applied in ${(iptablesElapsed / 1000).toFixed(2)} seconds`);
+    
+    // Start background monitoring to detect when Relay Proxy realizes it's disconnected
+    console.log('[TIMING] Starting background monitoring to detect when Relay Proxy realizes disconnection...');
+    monitorRelayProxyConnectionState('disconnect', disconnectStartTime).then(result => {
+      if (result.detected) {
+        console.log(`[TIMING] === DISCONNECT SUMMARY ===`);
+        console.log(`[TIMING] iptables rule applied: ${(iptablesElapsed / 1000).toFixed(2)}s`);
+        console.log(`[TIMING] Relay Proxy detected disconnection: ${(result.elapsed / 1000).toFixed(2)}s`);
+        console.log(`[TIMING] Time for Relay Proxy to realize connection is gone: ${((result.elapsed - iptablesElapsed) / 1000).toFixed(2)}s`);
+      }
+    });
+    
     return res.status(200).json({
       success: true,
       message: 'Relay Proxy disconnected from LaunchDarkly',
       containerIP,
       subnet,
-      rule: `Block ${containerIP} to internet, allow ${subnet}`
+      rule: `Block ${containerIP} to internet, allow ${subnet}`,
+      timing: {
+        disconnectStarted: new Date(disconnectStartTime).toISOString(),
+        iptablesApplied: new Date(iptablesAppliedTime).toISOString(),
+        iptablesElapsedMs: iptablesElapsed
+      }
     });
     
   } catch (error) {
@@ -1969,6 +2066,9 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
 // Relay Proxy reconnect endpoint
 app.post('/api/relay-proxy/reconnect', async (req, res) => {
   try {
+    const reconnectStartTime = Date.now();
+    console.log(`[TIMING] Reconnect initiated at ${new Date(reconnectStartTime).toISOString()}`);
+    
     // 1. Get container IP address
     const containerIP = await getContainerIP('relay-proxy');
     
@@ -2010,11 +2110,35 @@ app.post('/api/relay-proxy/reconnect', async (req, res) => {
       });
     }
     
+    const iptablesRemovedTime = Date.now();
+    const iptablesElapsed = iptablesRemovedTime - reconnectStartTime;
+    console.log(`[TIMING] iptables rule removed in ${(iptablesElapsed / 1000).toFixed(2)} seconds`);
+    
+    // Start background monitoring to detect when Relay Proxy successfully reconnects
+    console.log('[TIMING] Starting background monitoring to detect when Relay Proxy successfully reconnects...');
+    monitorRelayProxyConnectionState('reconnect', reconnectStartTime).then(result => {
+      if (result.detected) {
+        console.log(`[TIMING] === RECONNECT SUMMARY ===`);
+        console.log(`[TIMING] iptables rule removed: ${(iptablesElapsed / 1000).toFixed(2)}s`);
+        console.log(`[TIMING] Relay Proxy successfully reconnected: ${(result.elapsed / 1000).toFixed(2)}s`);
+        console.log(`[TIMING] Time from network available to successful reconnection: ${((result.elapsed - iptablesElapsed) / 1000).toFixed(2)}s`);
+      } else if (result.timeout) {
+        console.log(`[TIMING] === RECONNECT TIMEOUT ===`);
+        console.log(`[TIMING] Relay Proxy did not reconnect within monitoring period`);
+        console.log(`[TIMING] Last known state: ${result.state}`);
+      }
+    });
+    
     return res.status(200).json({
       success: true,
       message: 'Relay Proxy reconnected to LaunchDarkly',
       containerIP,
-      subnet
+      subnet,
+      timing: {
+        reconnectStarted: new Date(reconnectStartTime).toISOString(),
+        iptablesRemoved: new Date(iptablesRemovedTime).toISOString(),
+        iptablesElapsedMs: iptablesElapsed
+      }
     });
     
   } catch (error) {
