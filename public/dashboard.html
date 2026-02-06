@@ -1610,6 +1610,7 @@
           console.log(`[${this.serviceId}] SSE message received:`, event.data);
           const data = JSON.parse(event.data);
           console.log(`[${this.serviceId}] Parsed message:`, data.message);
+          console.log(`[${this.serviceId}] Hash info:`, data.hashInfo);
           this.updateFlagValue(data.message);
           
           // Update hash info if available
@@ -1695,15 +1696,20 @@
       
       // Update the displayed hash information
       updateHashInfo(hashInfo) {
+        console.log(`[${this.serviceId}] updateHashInfo called with:`, hashInfo);
         const hashElement = document.getElementById(`${this.serviceId}-hash-info`);
+        console.log(`[${this.serviceId}] hashElement found:`, !!hashElement);
         if (hashElement && hashInfo) {
           let html = '';
-          html += `<div style="margin-bottom: 4px;"><strong>Context Key:</strong> ${this.escapeHtml(this.currentContext.key || 'N/A')}</div>`;
+          html += `<div style="margin-bottom: 4px;"><strong>Context Key:</strong> ${this.escapeHtml(this.currentContext?.key || 'N/A')}</div>`;
           html += `<div style="margin-bottom: 4px;"><strong>Salt:</strong> ${this.escapeHtml(hashInfo.salt || 'N/A')}</div>`;
           html += `<div style="margin-bottom: 4px;"><strong>Hash Value:</strong> <span style="color: #405BFF;">${hashInfo.hashValue}</span></div>`;
           html += `<div><strong>Bucket Value:</strong> <span style="color: #4caf50; font-weight: 600;">${hashInfo.bucketValue.toFixed(5)}</span></div>`;
           html += `<div style="margin-top: 6px; font-size: 11px; color: #666; font-style: italic;">Bucket determines which variation the user receives in percentage rollouts</div>`;
           hashElement.innerHTML = html;
+          console.log(`[${this.serviceId}] Hash info updated successfully`);
+        } else {
+          console.log(`[${this.serviceId}] Hash info NOT updated - hashElement: ${!!hashElement}, hashInfo: ${!!hashInfo}`);
         }
       }
       
@@ -2638,7 +2644,7 @@
     async function fetchPythonFlagValue() {
       try {
         // Don't pass contextKey - let the server use current_context
-        const response = await fetch('http://localhost:5000/api/flag');
+        const response = await fetch('http://localhost:4000/api/python/flag');
         const data = await response.json();
         
         const flagValueElement = document.getElementById('python-flag-value');
@@ -4866,6 +4872,31 @@
           } finally {
             pythonTestButton.disabled = false;
             pythonTestButton.textContent = 'Test Flag Evaluation';
+          }
+        });
+      }
+      
+      // Python hash toggle functionality
+      const pythonHashToggle = document.getElementById('python-hash-toggle');
+      const pythonHashContent = document.getElementById('python-hash-content');
+      const pythonSdkCache = document.getElementById('python-sdk-cache');
+      if (pythonHashToggle && pythonHashContent) {
+        pythonHashToggle.addEventListener('click', (e) => {
+          e.preventDefault();
+          if (pythonHashContent.style.display === 'none') {
+            pythonHashContent.style.display = 'block';
+            pythonHashToggle.textContent = 'Hide';
+            // Shrink SDK cache to make room for hash section
+            if (pythonSdkCache) {
+              pythonSdkCache.style.maxHeight = '150px';
+            }
+          } else {
+            pythonHashContent.style.display = 'none';
+            pythonHashToggle.textContent = 'Show';
+            // Restore SDK cache height
+            if (pythonSdkCache) {
+              pythonSdkCache.style.maxHeight = '280px';
+            }
           }
         });
       }

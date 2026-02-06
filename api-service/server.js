@@ -1149,6 +1149,31 @@ app.get('/api/python/status', async (req, res) => {
   }
 });
 
+// Python flag evaluation endpoint (proxy to Python app)
+app.get('/api/python/flag', async (req, res) => {
+  const pythonAppUrl = process.env.PYTHON_APP_URL || 'http://python-app-dev:5000';
+  
+  try {
+    const response = await fetchWithTimeout(
+      `${pythonAppUrl}/api/flag`,
+      {},
+      5000
+    );
+    
+    const data = await response.json();
+    
+    // Preserve original status code from Python app
+    res.status(response.status).json(data);
+  } catch (error) {
+    logError('/api/python/flag', error, {
+      upstreamUrl: `${pythonAppUrl}/api/flag`
+    });
+    res.status(500).json({
+      error: 'Unable to connect to Python application'
+    });
+  }
+});
+
 // Python context endpoint (proxy to Python app)
 // GET: Fetch current context
 app.get('/api/python/context', async (req, res) => {

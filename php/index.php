@@ -794,6 +794,12 @@ if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
         try {
             global $hashExposer;
             
+            if (!$hashExposer) {
+                log_message("PHP SDK: WARNING - hashExposer is not initialized!");
+            } else {
+                log_message("PHP SDK: hashExposer is available, calculating hash...");
+            }
+            
             // Get salt from flag configuration in Redis
             $salt = 'user-message'; // Default fallback
             try {
@@ -814,17 +820,39 @@ if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
                     $flagConfig = json_decode($flagData, true);
                     if (isset($flagConfig['salt'])) {
                         $salt = $flagConfig['salt'];
+                        log_message("PHP SDK: Got salt from Redis: " . $salt);
                     }
                 }
             } catch (Exception $redisError) {
                 log_message("PHP SDK: Could not get salt from Redis: " . $redisError->getMessage());
             }
             
+            // Extract user context key from multi-context
+            // Multi-context getKey() returns empty string, so we need to get the individual context
+            $contextKey = '';
+            if ($context->isMultiple()) {
+                // Get the user context from the multi-context
+                $userContext = $context->getIndividualContext('user');
+                if ($userContext) {
+                    $contextKey = $userContext->getKey();
+                    log_message("PHP SDK: Extracted user context key from multi-context: " . $contextKey);
+                } else {
+                    log_message("PHP SDK: WARNING - Could not extract user context from multi-context");
+                }
+            } else {
+                $contextKey = $context->getKey();
+                log_message("PHP SDK: Using single context key: " . $contextKey);
+            }
+            
+            log_message("PHP SDK: Calculating hash with flagKey=user-message, contextKey=" . $contextKey . ", salt=" . $salt);
+            
             $hashResult = $hashExposer->expose([
                 'flagKey' => 'user-message',
-                'contextKey' => $context->getKey(),
+                'contextKey' => $contextKey,
                 'salt' => $salt
             ]);
+            
+            log_message("PHP SDK: Hash calculation result: " . json_encode($hashResult));
             
             if (!isset($hashResult['error'])) {
                 $hashInfo = [
@@ -832,10 +860,16 @@ if ($requestPath === '/api/message/stream' && $requestMethod === 'GET') {
                     'bucketValue' => $hashResult['bucketValue'],
                     'salt' => $hashResult['salt']
                 ];
+                log_message("PHP SDK: Hash info created: " . json_encode($hashInfo));
+            } else {
+                log_message("PHP SDK: Hash result contains error: " . $hashResult['error']);
             }
         } catch (Exception $hashError) {
             log_message("PHP SDK: Error calculating hash value: " . $hashError->getMessage());
+            log_message("PHP SDK: Stack trace: " . $hashError->getTraceAsString());
         }
+        
+        log_message("PHP SDK: About to send SSE with hashInfo: " . ($hashInfo ? json_encode($hashInfo) : 'null'));
         
         // Send actual flag value with hash info
         sendSSE($message, $hashInfo);
