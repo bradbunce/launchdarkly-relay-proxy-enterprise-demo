@@ -575,6 +575,26 @@
       background: #f5f5f5;
     }
 
+    .status-text.transitioning {
+      color: #f57c00;
+      background: #fff3e0;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    .status-text.error {
+      color: #c62828;
+      background: #ffcdd2;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.6;
+      }
+    }
+
     .error-message {
       margin-top: 10px;
       padding: 10px;
@@ -1173,6 +1193,7 @@
         this.errorDiv = document.getElementById('connection-error');
         this.isUpdating = false;
         this.pollingInterval = null;
+        this.lastState = null;
         
         // Verify elements exist
         if (!this.toggle) {
@@ -1200,16 +1221,23 @@
           this.toggle.addEventListener('change', (e) => this.handleToggle(e));
         }
         
-        // Poll for status updates every 5 seconds
-        this.pollingInterval = setInterval(() => this.loadConnectionStatus(), 5000);
+        // Poll for status updates every 2 seconds (faster to catch state transitions)
+        this.pollingInterval = setInterval(() => this.loadConnectionStatus(), 2000);
       }
       
       async loadConnectionStatus() {
         try {
-          const response = await fetch('http://localhost:4000/api/relay-proxy/connection-status');
+          // Use the actual connection state endpoint to get real Relay Proxy state
+          const response = await fetch('http://localhost:4000/api/relay-proxy/actual-connection-state');
           const data = await response.json();
           
-          this.updateUI(data.connected, data.containerRunning);
+          // Log state changes
+          if (this.lastState !== data.state) {
+            console.log(`[Connection State] Changed from ${this.lastState} to ${data.state}`);
+            this.lastState = data.state;
+          }
+          
+          this.updateUI(data);
         } catch (error) {
           console.error('Failed to load connection status:', error);
           this.showError('Failed to load connection status');
@@ -1231,6 +1259,9 @@
           : '/api/relay-proxy/disconnect';
         
         try {
+          // Show transitioning state immediately
+          this.updateTransitioningState(shouldConnect);
+          
           const response = await fetch(`http://localhost:4000${endpoint}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
@@ -1242,8 +1273,8 @@
             throw new Error(data.error || 'Operation failed');
           }
           
-          // Update UI to reflect new state
-          this.updateUI(shouldConnect, true);
+          // The polling will update the UI with the actual state
+          console.log(`[Connection Toggle] ${shouldConnect ? 'Reconnect' : 'Disconnect'} initiated. Waiting for Relay Proxy to detect state change...`);
           
         } catch (error) {
           console.error('Connection toggle failed:', error);
@@ -1257,13 +1288,26 @@
         }
       }
       
-      updateUI(connected, containerRunning) {
+      updateTransitioningState(connecting) {
+        if (!this.statusText) return;
+        
+        if (connecting) {
+          this.statusText.textContent = 'Reconnecting...';
+          this.statusText.className = 'status-text transitioning';
+        } else {
+          this.statusText.textContent = 'Disconnecting...';
+          this.statusText.className = 'status-text transitioning';
+        }
+      }
+      
+      updateUI(data) {
         if (!this.toggle || !this.statusText) {
           console.error('[RelayProxyConnectionControl] Cannot update UI - elements not found');
           return;
         }
         
-        if (!containerRunning) {
+        // Handle container stopped state
+        if (data.state === 'CONTAINER_STOPPED') {
           this.toggle.disabled = true;
           this.toggle.checked = false;
           this.statusText.textContent = 'Container Stopped';
@@ -1271,12 +1315,59 @@
           return;
         }
         
+        // Handle error state
+        if (data.state === 'ERROR' || data.state === 'UNREACHABLE') {
+          this.toggle.disabled = true;
+          this.statusText.textContent = 'Error';
+          this.statusText.className = 'status-text error';
+          this.showError(data.message || 'Cannot reach Relay Proxy');
+          return;
+        }
+        
+        // Enable toggle
         this.toggle.disabled = false;
-        this.toggle.checked = connected;
-        this.statusText.textContent = connected ? 'Connected' : 'Disconnected';
-        this.statusText.className = connected 
-          ? 'status-text connected' 
-          : 'status-text disconnected';
+        
+        // Update based on actual connection state
+        switch (data.state) {
+          case 'VALID':
+            // Fully connected
+            this.toggle.checked = true;
+            this.statusText.textContent = 'Connected';
+            this.statusText.className = 'status-text connected';
+            if (data.readyToTest) {
+              this.statusText.title = 'Ready to test connected behavior';
+              console.log('[Connection State] ✅ CONNECTED - Ready to test connected behavior');
+            }
+            break;
+            
+          case 'INTERRUPTED':
+          case 'OFF':
+            // Fully disconnected
+            this.toggle.checked = false;
+            this.statusText.textContent = 'Disconnected';
+            this.statusText.className = 'status-text disconnected';
+            if (data.readyToTest) {
+              this.statusText.title = 'Ready to test disconnected behavior';
+              console.log('[Connection State] ⚠️ DISCONNECTED - Ready to test disconnected behavior');
+            }
+            break;
+            
+          case 'INITIALIZING':
+            // Starting up
+            this.toggle.checked = false;
+            this.statusText.textContent = 'Initializing...';
+            this.statusText.className = 'status-text transitioning';
+            this.statusText.title = 'Relay Proxy is starting up';
+            break;
+            
+          default:
+            // Unknown or transitioning state
+            this.statusText.textContent = 'Transitioning...';
+            this.statusText.className = 'status-text transitioning';
+            this.statusText.title = data.message || 'Connection state is changing';
+            console.log(`[Connection State] 🔄 TRANSITIONING - ${data.message || 'State is changing'}`);
+            break;
+        }
       }
       
       showError(message) {

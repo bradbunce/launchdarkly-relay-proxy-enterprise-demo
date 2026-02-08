@@ -356,6 +356,88 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy' });
 });
 
+// Real-time Relay Proxy connection state endpoint
+// This endpoint checks the ACTUAL connection state by examining the Relay Proxy's
+// environment connection status, not just the iptables rules
+app.get('/api/relay-proxy/actual-connection-state', async (req, res) => {
+  const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
+  
+  try {
+    // Check if container is running
+    const isRunning = await checkContainerRunning('relay-proxy');
+    if (!isRunning) {
+      return res.json({
+        state: 'CONTAINER_STOPPED',
+        connected: false,
+        message: 'Relay Proxy container is not running',
+        readyToTest: false
+      });
+    }
+    
+    // Get the Relay Proxy status
+    const response = await fetchWithTimeout(`${relayProxyUrl}/status`, {}, 3000);
+    
+    if (!response.ok) {
+      return res.json({
+        state: 'UNREACHABLE',
+        connected: false,
+        message: 'Cannot reach Relay Proxy status endpoint',
+        readyToTest: false
+      });
+    }
+    
+    const data = await response.json();
+    
+    // Check environment connection state
+    let connectionState = 'UNKNOWN';
+    let stateReason = '';
+    
+    if (data.environments) {
+      const envKeys = Object.keys(data.environments);
+      if (envKeys.length > 0) {
+        const env = data.environments[envKeys[0]];
+        
+        // Check connection status
+        if (env.connectionStatus) {
+          connectionState = env.connectionStatus.state;
+          stateReason = env.connectionStatus.stateReason || '';
+        }
+      }
+    }
+    
+    // Determine if connected and ready to test
+    const isConnected = connectionState === 'VALID';
+    const isDisconnected = connectionState === 'INTERRUPTED' || connectionState === 'OFF';
+    
+    // Ready to test means the state is stable (either fully connected or fully disconnected)
+    const readyToTest = isConnected || isDisconnected;
+    
+    return res.json({
+      state: connectionState,
+      connected: isConnected,
+      disconnected: isDisconnected,
+      stateReason: stateReason,
+      readyToTest: readyToTest,
+      message: isConnected 
+        ? 'Relay Proxy is connected to LaunchDarkly - ready to test'
+        : isDisconnected
+        ? 'Relay Proxy is disconnected from LaunchDarkly - ready to test'
+        : 'Relay Proxy connection state is transitioning - wait before testing',
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    logError('/api/relay-proxy/actual-connection-state', error);
+    return res.status(500).json({
+      state: 'ERROR',
+      connected: false,
+      readyToTest: false,
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Relay Proxy status endpoint
 app.get('/api/relay-status', async (req, res) => {
   const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
@@ -2035,6 +2117,7 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
         console.log(`[TIMING] iptables rule applied: ${(iptablesElapsed / 1000).toFixed(2)}s`);
         console.log(`[TIMING] Relay Proxy detected disconnection: ${(result.elapsed / 1000).toFixed(2)}s`);
         console.log(`[TIMING] Time for Relay Proxy to realize connection is gone: ${((result.elapsed - iptablesElapsed) / 1000).toFixed(2)}s`);
+        console.log(`[CONNECTION STATE] Relay Proxy is now DISCONNECTED - ready to test disconnected behavior`);
       }
     });
     
@@ -2122,6 +2205,7 @@ app.post('/api/relay-proxy/reconnect', async (req, res) => {
         console.log(`[TIMING] iptables rule removed: ${(iptablesElapsed / 1000).toFixed(2)}s`);
         console.log(`[TIMING] Relay Proxy successfully reconnected: ${(result.elapsed / 1000).toFixed(2)}s`);
         console.log(`[TIMING] Time from network available to successful reconnection: ${((result.elapsed - iptablesElapsed) / 1000).toFixed(2)}s`);
+        console.log(`[CONNECTION STATE] Relay Proxy is now CONNECTED - ready to test connected behavior`);
       } else if (result.timeout) {
         console.log(`[TIMING] === RECONNECT TIMEOUT ===`);
         console.log(`[TIMING] Relay Proxy did not reconnect within monitoring period`);
