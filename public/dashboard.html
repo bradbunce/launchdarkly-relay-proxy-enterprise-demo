@@ -1203,6 +1203,8 @@
         this.isUpdating = false;
         this.pollingInterval = null;
         this.lastState = null;
+        this.userInitiatedTransition = false; // Track if user clicked the toggle
+        this.expectedState = null; // Track what state we're transitioning to
         
         // Verify elements exist
         if (!this.toggle) {
@@ -1244,6 +1246,16 @@
           if (this.lastState !== data.state) {
             console.log(`[Connection State] Changed from ${this.lastState} to ${data.state}`);
             this.lastState = data.state;
+            
+            // If we're in a user-initiated transition and the state matches what we expected, clear the flag
+            if (this.userInitiatedTransition) {
+              if ((this.expectedState === 'connected' && (data.state === 'VALID')) ||
+                  (this.expectedState === 'disconnected' && (data.state === 'INTERRUPTED' || data.state === 'OFF'))) {
+                console.log('[Connection State] Transition complete, clearing user-initiated flag');
+                this.userInitiatedTransition = false;
+                this.expectedState = null;
+              }
+            }
           }
           
           this.updateUI(data);
@@ -1268,6 +1280,11 @@
           : '/api/relay-proxy/disconnect';
         
         try {
+          // Mark that user initiated this transition
+          this.userInitiatedTransition = true;
+          this.expectedState = shouldConnect ? 'connected' : 'disconnected';
+          console.log(`[Connection State DEBUG] Flags set: userInitiatedTransition=true, expectedState=${this.expectedState}`);
+          
           // Show transitioning state immediately
           this.updateTransitioningState(shouldConnect);
           
@@ -1298,21 +1315,49 @@
       }
       
       updateTransitioningState(connecting) {
-        if (!this.statusText) return;
+        if (!this.statusText || !this.toggle) return;
+        
+        console.log(`[Connection State DEBUG] updateTransitioningState called with connecting=${connecting}`);
+        
+        // Disable toggle during transition
+        this.toggle.disabled = true;
         
         if (connecting) {
           this.statusText.textContent = 'Reconnecting...';
           this.statusText.className = 'status-text transitioning';
+          this.statusText.title = 'Waiting for Relay Proxy to reconnect - please wait';
         } else {
           this.statusText.textContent = 'Disconnecting...';
           this.statusText.className = 'status-text transitioning';
+          this.statusText.title = 'Waiting for Relay Proxy to detect disconnection - please wait';
         }
       }
       
       updateUI(data) {
+        console.log(`[Connection State DEBUG] updateUI called with state=${data.state}, userInitiatedTransition=${this.userInitiatedTransition}, expectedState=${this.expectedState}`);
+        
         if (!this.toggle || !this.statusText) {
           console.error('[RelayProxyConnectionControl] Cannot update UI - elements not found');
           return;
+        }
+        
+        // If user initiated a transition, keep showing transitioning state until actual state changes
+        if (this.userInitiatedTransition) {
+          console.log(`[Connection State DEBUG] userInitiatedTransition=true, expectedState=${this.expectedState}, data.state=${data.state}`);
+          
+          // Check if we're still waiting for the expected state
+          const isWaitingForDisconnect = this.expectedState === 'disconnected' && 
+                                         (data.state === 'VALID');
+          const isWaitingForConnect = this.expectedState === 'connected' && 
+                                      (data.state === 'INTERRUPTED' || data.state === 'OFF');
+          
+          console.log(`[Connection State DEBUG] isWaitingForDisconnect=${isWaitingForDisconnect}, isWaitingForConnect=${isWaitingForConnect}`);
+          
+          if (isWaitingForDisconnect || isWaitingForConnect) {
+            // Keep showing transitioning state, don't update UI yet
+            console.log(`[Connection State] Still waiting for ${this.expectedState} state (current: ${data.state})`);
+            return;
+          }
         }
         
         // Handle container stopped state
@@ -1321,6 +1366,7 @@
           this.toggle.checked = false;
           this.statusText.textContent = 'Container Stopped';
           this.statusText.className = 'status-text stopped';
+          this.userInitiatedTransition = false;
           return;
         }
         
@@ -1330,6 +1376,7 @@
           this.statusText.textContent = 'Error';
           this.statusText.className = 'status-text error';
           this.showError(data.message || 'Cannot reach Relay Proxy');
+          this.userInitiatedTransition = false;
           return;
         }
         
@@ -3828,29 +3875,32 @@
               if (stopButton) stopButton.style.display = 'flex';
               if (restartButton) restartButton.style.display = 'flex';
               
-              // If Redis just came back online, manually fetch the data store
-              if (!wasRedisConnected && isConnected) {
-                console.log('[Redis] Service reconnected, fetching data store manually');
-                const dataStoreElement = document.getElementById('redis-data-store');
-                if (dataStoreElement && 
-                    (dataStoreElement.innerHTML.includes('Waiting for Redis') || 
-                     dataStoreElement.innerHTML.includes('not responding'))) {
-                  // Fetch from Relay Proxy cache endpoint (POST method)
-                  try {
-                    const cacheResponse = await fetch('http://localhost:4000/api/relay-proxy/cache', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' }
-                    });
-                    if (cacheResponse.ok) {
-                      const cacheData = await cacheResponse.json();
-                      if (cacheData.flags) {
-                        console.log('[Redis] Data store fetched successfully:', Object.keys(cacheData.flags).length, 'flags');
-                        window.renderRedisDataStore(cacheData.flags);
-                      }
+              // If Redis just came back online OR if data store is empty, fetch the data
+              const dataStoreElement = document.getElementById('redis-data-store');
+              const shouldFetch = !wasRedisConnected || 
+                                  (dataStoreElement && 
+                                   (dataStoreElement.innerHTML.includes('Waiting for Redis') || 
+                                    dataStoreElement.innerHTML.includes('not responding') ||
+                                    dataStoreElement.innerHTML.includes('font-style: italic')));
+              
+              if (shouldFetch) {
+                console.log('[Redis] Fetching data store (wasRedisConnected:', wasRedisConnected, ')');
+                // Fetch from PHP redis-cache endpoint (which reads from Redis)
+                try {
+                  const cacheResponse = await fetch('http://localhost:4000/api/php/redis-cache', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                  });
+                  if (cacheResponse.ok) {
+                    const cacheData = await cacheResponse.json();
+                    if (cacheData.flags) {
+                      console.log('[Redis] Data store fetched successfully:', Object.keys(cacheData.flags).length, 'flags');
+                      window.renderRedisDataStore(cacheData.flags);
                     }
-                  } catch (error) {
-                    console.error('[Redis] Error fetching data store:', error);
                   }
+                } catch (error) {
+                  console.error('[Redis] Error fetching data store:', error);
                 }
               }
               

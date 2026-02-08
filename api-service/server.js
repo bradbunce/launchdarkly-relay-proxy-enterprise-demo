@@ -377,6 +377,26 @@ app.get('/api/relay-proxy/actual-connection-state', async (req, res) => {
       });
     }
     
+    // Check if there's an iptables rule blocking the relay-proxy
+    // This helps us distinguish between "transitioning because starting up" vs "blocked by manual disconnect"
+    let isManuallyDisconnected = false;
+    try {
+      const containerIP = await getContainerIP('relay-proxy');
+      const subnet = await getDockerNetworkSubnet('launchdarkly-network');
+      
+      if (containerIP && subnet) {
+        // Check if blocking rule exists
+        await execPromise(
+          `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`
+        );
+        // If command succeeds, rule exists - user manually disconnected
+        isManuallyDisconnected = true;
+      }
+    } catch (error) {
+      // Rule doesn't exist - not manually disconnected
+      isManuallyDisconnected = false;
+    }
+    
     // Get the Relay Proxy status
     const response = await fetchWithTimeout(`${relayProxyUrl}/status`, {}, 3000);
     
@@ -385,7 +405,8 @@ app.get('/api/relay-proxy/actual-connection-state', async (req, res) => {
         state: 'UNREACHABLE',
         connected: false,
         message: 'Cannot reach Relay Proxy status endpoint',
-        readyToTest: false
+        readyToTest: false,
+        manuallyDisconnected: isManuallyDisconnected
       });
     }
     
@@ -408,6 +429,13 @@ app.get('/api/relay-proxy/actual-connection-state', async (req, res) => {
       }
     }
     
+    // If manually disconnected and in INITIALIZING or UNKNOWN state, treat as INTERRUPTED
+    // This provides better UX - user sees "Disconnected" instead of "Transitioning"
+    if (isManuallyDisconnected && (connectionState === 'INITIALIZING' || connectionState === 'UNKNOWN')) {
+      connectionState = 'INTERRUPTED';
+      stateReason = 'Manually disconnected (iptables rule active)';
+    }
+    
     // Determine if connected and ready to test
     const isConnected = connectionState === 'VALID';
     const isDisconnected = connectionState === 'INTERRUPTED' || connectionState === 'OFF';
@@ -421,10 +449,13 @@ app.get('/api/relay-proxy/actual-connection-state', async (req, res) => {
       disconnected: isDisconnected,
       stateReason: stateReason,
       readyToTest: readyToTest,
+      manuallyDisconnected: isManuallyDisconnected,
       message: isConnected 
         ? 'Relay Proxy is connected to LaunchDarkly - ready to test'
         : isDisconnected
-        ? 'Relay Proxy is disconnected from LaunchDarkly - ready to test'
+        ? isManuallyDisconnected 
+          ? 'Relay Proxy is manually disconnected (iptables rule active) - ready to test'
+          : 'Relay Proxy is disconnected from LaunchDarkly - ready to test'
         : 'Relay Proxy connection state is transitioning - wait before testing',
       timestamp: new Date().toISOString()
     });
@@ -698,7 +729,10 @@ async function initRelayProxyCacheClient() {
   class CaptureStore {
     constructor() {
       this.data = { flags: {}, segments: {} };
-      this.isInitialized = false;
+      // Mark as initialized immediately so SDK doesn't block waiting for init data
+      // This allows the SDK to connect and receive streaming updates even if
+      // the Relay Proxy can't serve initial data (e.g., when Redis is down)
+      this.isInitialized = true;
     }
 
     init(allData, cb) {
@@ -715,6 +749,8 @@ async function initRelayProxyCacheClient() {
           this.data.segments = { ...allData.segments };
           console.log('[Relay Proxy Cache] Captured', Object.keys(allData.segments).length, 'segments');
         }
+      } else {
+        console.log('[Relay Proxy Cache] No initial data received (Redis may be unavailable)');
       }
       
       this.isInitialized = true;
@@ -779,11 +815,21 @@ async function initRelayProxyCacheClient() {
     featureStore: captureStore,
     stream: true,
     sendEvents: false,
-    diagnosticOptOut: true
+    diagnosticOptOut: true,
+    // Use streaming only mode - don't require initial data from store
+    // This allows the client to work even when Redis is down
+    useLdd: false
   });
 
-  await relayProxyCacheClient.waitForInitialization({ timeout: 10 });
-  console.log('[Relay Proxy Cache] SDK client initialized and connected to Relay Proxy');
+  try {
+    await relayProxyCacheClient.waitForInitialization({ timeout: 10 });
+    console.log('[Relay Proxy Cache] SDK client initialized and connected to Relay Proxy');
+  } catch (error) {
+    console.warn('[Relay Proxy Cache] SDK client initialization timed out (Redis may be down):', error.message);
+    console.log('[Relay Proxy Cache] Will continue with streaming updates only');
+    // Don't throw - allow the client to continue receiving streaming updates
+    // The client will still receive updates via streaming even if initialization failed
+  }
   
   return relayProxyCacheClient;
 }
@@ -2212,29 +2258,13 @@ app.post('/api/relay-proxy/reconnect', async (req, res) => {
     } catch (error) {
       // Rule doesn't exist, which is good
     }
-        containerIP,
-        subnet
-      });
-    }
     
-    // 4. Remove the iptables rule from DOCKER-USER chain on the Docker host
-    try {
-      await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP`
-      );
-      console.log(`Removed DOCKER-USER rule from host for ${containerIP}`);
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        error: `Failed to remove iptables rule: ${error.message}`
-      });
-    }
-    
+    // 5. Calculate timing for iptables cleanup
     const iptablesRemovedTime = Date.now();
     const iptablesElapsed = iptablesRemovedTime - reconnectStartTime;
-    console.log(`[TIMING] iptables rule removed in ${(iptablesElapsed / 1000).toFixed(2)} seconds`);
+    console.log(`[TIMING] iptables cleanup completed in ${(iptablesElapsed / 1000).toFixed(2)} seconds (${rulesRemoved} rules removed)`);
     
-    // Start background monitoring to detect when Relay Proxy successfully reconnects
+    // 6. Start background monitoring to detect when Relay Proxy successfully reconnects
     console.log('[TIMING] Starting background monitoring to detect when Relay Proxy successfully reconnects...');
     monitorRelayProxyConnectionState('reconnect', reconnectStartTime).then(result => {
       if (result.detected) {
