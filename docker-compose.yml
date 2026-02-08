@@ -29,7 +29,8 @@ services:
     environment:
       - LAUNCHDARKLY_CLIENT_SIDE_ID=${LAUNCHDARKLY_CLIENT_SIDE_ID}
     networks:
-      - launchdarkly-network
+      launchdarkly-network:
+        ipv4_address: 172.18.0.10
     # No service dependencies - dashboard is a static site that connects
     # to api-service, node-app-dev, and php-app-dev via client-side JavaScript.
     # This allows the dashboard to remain available even if backend services restart.
@@ -82,7 +83,8 @@ services:
     # Privileged mode: Required for iptables access to host network
     privileged: true
     networks:
-      - launchdarkly-network
+      launchdarkly-network:
+        ipv4_address: 172.18.0.20
     # Service Dependencies:
     # - relay-proxy: API service checks relay proxy status
     # - redis: API service checks Redis connectivity
@@ -127,7 +129,8 @@ services:
     # User: root required to access Docker socket
     user: root
     networks:
-      - launchdarkly-network
+      launchdarkly-network:
+        ipv4_address: 172.18.0.30
     # Service Dependencies:
     # - relay-proxy: Node.js SDK connects to relay proxy for all operations
     depends_on:
@@ -162,7 +165,8 @@ services:
       - ENV_DATASTORE_PREFIX=ld-flags-$$CID
       - CORS_ALLOW_ORIGIN=http://localhost:3000
     networks:
-      - launchdarkly-network
+      launchdarkly-network:
+        ipv4_address: 172.18.0.40
     # Service Dependencies:
     # - redis: Relay proxy requires Redis for persistent flag storage
     #   Waits for Redis to be healthy before starting (condition: service_healthy)
@@ -192,7 +196,8 @@ services:
     volumes:
       - redis-data:/data
     networks:
-      - launchdarkly-network
+      launchdarkly-network:
+        ipv4_address: 172.18.0.50
     # Health Check: Verifies Redis is accepting connections
     # Runs every 5 seconds, times out after 3 seconds, retries 5 times
     # Other services wait for this health check before starting
@@ -229,7 +234,8 @@ services:
       - REDIS_PREFIX=${REDIS_PREFIX:-}
       - RELAY_PROXY_URL=http://relay-proxy:8030
     networks:
-      - launchdarkly-network
+      launchdarkly-network:
+        ipv4_address: 172.18.0.60
     # Service Dependencies:
     # - redis: PHP SDK reads feature flags directly from Redis
     #   Waits for Redis to be healthy before starting (condition: service_healthy)
@@ -258,7 +264,8 @@ services:
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
       - PORT=5000
     networks:
-      - launchdarkly-network
+      launchdarkly-network:
+        ipv4_address: 172.18.0.70
     # Health Check: Verifies Python service is responding
     # Runs every 10 seconds, times out after 3 seconds, retries 3 times
     healthcheck:
@@ -275,6 +282,10 @@ services:
 networks:
   launchdarkly-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
+          gateway: 172.18.0.1
 
 # ==============================================================================
 # Volumes

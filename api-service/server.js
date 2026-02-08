@@ -2167,17 +2167,51 @@ app.post('/api/relay-proxy/reconnect', async (req, res) => {
       });
     }
     
-    // 3. Check if already connected by checking for rule on the Docker host
+    // 3. Clean up ALL blocking rules for this subnet (not just current relay-proxy IP)
+    // This handles cases where containers were restarted and got new IPs
+    let rulesRemoved = 0;
+    try {
+      // List all DROP rules in DOCKER-USER chain
+      const { stdout } = await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -S DOCKER-USER 2>&1 | grep "DROP" || true`
+      );
+      
+      if (stdout.trim()) {
+        const rules = stdout.trim().split('\n').filter(r => r.trim());
+        console.log(`Found ${rules.length} DROP rules to clean up`);
+        
+        for (const rule of rules) {
+          // Convert -A to -D for deletion
+          const deleteRule = rule.replace('-A DOCKER-USER', '-D DOCKER-USER');
+          try {
+            await execPromise(
+              `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables ${deleteRule}`
+            );
+            rulesRemoved++;
+            console.log(`Removed blocking rule: ${rule}`);
+          } catch (error) {
+            console.error(`Failed to remove rule: ${rule}`, error.message);
+          }
+        }
+      }
+    } catch (error) {
+      console.log('Note: Error cleaning up rules:', error.message);
+    }
+    
+    // 4. Verify no rules remain for current relay-proxy IP
     try {
       await execPromise(
         `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`
       );
-      // Rule exists, need to remove it
+      // Rule still exists, try to remove it specifically
+      await execPromise(
+        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP`
+      );
+      rulesRemoved++;
+      console.log(`Removed specific rule for ${containerIP}`);
     } catch (error) {
-      // Rule doesn't exist, already connected
-      return res.status(200).json({
-        success: true,
-        message: 'Relay Proxy already connected',
+      // Rule doesn't exist, which is good
+    }
         containerIP,
         subnet
       });
