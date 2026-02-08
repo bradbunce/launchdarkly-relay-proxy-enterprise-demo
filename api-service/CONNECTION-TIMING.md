@@ -123,10 +123,11 @@ Based on testing and TCP behavior:
 
 ### Disconnect Detection
 - **iptables rule applied**: < 2 seconds (typically ~1 second)
-- **Relay Proxy detects disconnection**: 30-120 seconds
-  - Depends on TCP keepalive settings
-  - Depends on application-level timeout settings
-  - LaunchDarkly SDK typically detects within 30-60 seconds
+- **Relay Proxy detects disconnection**: 2-5 minutes (120-300 seconds)
+  - LaunchDarkly SDK uses very long timeouts and keepalives
+  - Existing streaming connections are extremely resilient
+  - The SDK will eventually detect the connection is dead and change state to INTERRUPTED
+  - **Note**: This is much longer than typical TCP timeouts due to SDK-level keepalives
 
 ### Reconnection
 - **iptables rule removed**: < 1 second (typically ~0.1-0.5 seconds)

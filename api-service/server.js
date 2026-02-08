@@ -8,7 +8,7 @@ async function monitorRelayProxyConnectionState(action, startTime) {
   const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
   let lastState = null;
   let checkCount = 0;
-  const maxChecks = action === 'disconnect' ? 60 : 120; // 2 minutes for disconnect, 4 minutes for reconnect
+  const maxChecks = action === 'disconnect' ? 180 : 120; // 6 minutes for disconnect, 4 minutes for reconnect
 
   return new Promise((resolve) => {
     const interval = setInterval(async () => {
@@ -37,12 +37,14 @@ async function monitorRelayProxyConnectionState(action, startTime) {
           if (action === 'disconnect' && currentState === 'INTERRUPTED') {
             console.log(`[TIMING] Relay Proxy detected disconnection after ${(elapsed / 1000).toFixed(2)} seconds`);
             console.log(`[TIMING] State changed from ${lastState} to ${currentState}`);
+            console.log(`[CONNECTION STATE] Relay Proxy is now DISCONNECTED - ready to test disconnected behavior`);
             clearInterval(interval);
             resolve({ detected: true, elapsed, state: currentState });
             return;
           } else if (action === 'reconnect' && currentState === 'VALID') {
             console.log(`[TIMING] Relay Proxy successfully reconnected after ${(elapsed / 1000).toFixed(2)} seconds`);
             console.log(`[TIMING] State changed from ${lastState} to ${currentState}`);
+            console.log(`[CONNECTION STATE] Relay Proxy is now CONNECTED - ready to test connected behavior`);
             clearInterval(interval);
             resolve({ detected: true, elapsed, state: currentState });
             return;
@@ -55,6 +57,7 @@ async function monitorRelayProxyConnectionState(action, startTime) {
         if (checkCount >= maxChecks) {
           const elapsed = Date.now() - startTime;
           console.log(`[TIMING] Monitoring timeout after ${(elapsed / 1000).toFixed(2)} seconds. Last state: ${currentState}`);
+          console.log(`[TIMING] Note: LaunchDarkly streaming connections can take 3-5 minutes to detect disconnection`);
           clearInterval(interval);
           resolve({ detected: false, elapsed, state: currentState, timeout: true });
         }
