@@ -104,10 +104,11 @@ docker-compose up -d
 docker-compose logs -f
 
 # Access the application
-# Dashboard UI: http://localhost:8000 (main interface)
+# Dashboard UI: http://localhost:8000 (main interface - includes all services)
 # Node.js API: http://localhost:3000 (backend only)
 # API service: http://localhost:4000 (backend only)
 # PHP API: http://localhost:8080 (backend only)
+# React App: Port 3001 (internal only - accessible via dashboard)
 ```
 
 ### 4. Changing Configuration
@@ -707,9 +708,9 @@ Requests/sec: 4118.44
 
 ## Architecture
 
-### 6-Container Architecture
+### 7-Container Architecture
 
-This application uses a microservices architecture with six specialized containers:
+This application uses a microservices architecture with seven specialized containers:
 
 **dashboard** (Dashboard UI Container):
 - Nginx Alpine
@@ -749,6 +750,14 @@ This application uses a microservices architecture with six specialized containe
 - Port: 8080
 - Purpose: LaunchDarkly PHP SDK demonstration
 
+**react-app-dev** (React Application Container):
+- Node.js 24 Alpine (build stage)
+- Nginx Alpine + Node.js 24 (production stage)
+- LaunchDarkly React Client SDK v3.9.0
+- **Fixed Mode**: Proxy Mode (Client-Side) only
+- Port: 3001
+- Purpose: LaunchDarkly React Client SDK demonstration
+
 **relay-proxy** (Relay Proxy Container):
 - LaunchDarkly Relay Proxy v8.16.4
 - AutoConfig mode
@@ -770,11 +779,12 @@ This application uses a microservices architecture with six specialized containe
 
 | Service | Port | Purpose |
 |---------|------|---------|
-| Dashboard | 8000 | Web UI access |
+| Dashboard | 8000 | Web UI access (includes all service panels) |
 | API Service | 4000 | API endpoints for status and operations |
-| Node.js App | 3000 | SDK demonstration endpoints |
-| Python App | 5000 | Python SDK demonstration |
-| PHP App | 8080 | PHP SDK demonstration |
+| Node.js App | 3000 | Backend API only (no UI) |
+| Python App | 5000 | Backend API only (no UI) |
+| PHP App | 8080 | Backend API only (no UI) |
+| React App | 3001 | Internal only (UI embedded in dashboard) |
 | Relay Proxy | 8030 | LaunchDarkly Relay Proxy |
 | Redis | 6379 | Internal only (no external port) |
 
@@ -784,7 +794,7 @@ All containers communicate via a custom Docker bridge network (`launchdarkly-net
 
 ### Multi-Language SDK Integration
 
-This demo showcases SDK integration across three different languages, each demonstrating a distinct integration pattern:
+This demo showcases SDK integration across four different languages, each demonstrating a distinct integration pattern:
 
 **Node.js Application** (Proxy Mode only):
 - All SDK traffic goes through the Relay Proxy
@@ -804,6 +814,13 @@ This demo showcases SDK integration across three different languages, each demon
 - Sends analytics events through the Relay Proxy
 - No direct LaunchDarkly API connections for flag evaluation
 - Backend API accessible at http://localhost:8080
+
+**React Application** (Proxy Mode - Client-Side):
+- Client-side SDK running in the browser
+- All SDK traffic goes through the Relay Proxy
+- Receives real-time flag updates via streaming
+- Sends analytics events through the Relay Proxy
+- UI embedded in dashboard at http://localhost:8000
 
 All applications:
 - Evaluate the same feature flags
@@ -851,22 +868,22 @@ The relay proxy uses Redis as a persistent data store for caching feature flag c
 └────────┬────────┘
          │
          ▼
-┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│  Node.js App    │      │  Python App     │      │  PHP App        │
-│  (Relay Proxy   │      │  (Default Mode) │      │  (Daemon Mode)  │
-│   Mode Only)    │      │  Direct Connect │      │  Redis + Events │
-│  (Port 3000)    │      │  (Port 5000)    │      │  (Port 8080)    │
-└────────┬────────┘      └────────┬────────┘      └────────┬────────┘
-         │                        │                        │
-         │ All SDK Traffic        │ Direct                 │ Direct Read
-         ▼                        │ Connection             ▼
-┌─────────────────┐               │               ┌─────────────────┐
-│  Relay Proxy    │───────────────┘               │  Redis          │
-│  (Port 8030)    │─────────────────────────────►│  (Port 6379)    │
-└────────┬────────┘                               └─────────────────┘
-         │                                                 │
-         │ Events                                          │ Events
-         └─────────────────────────────────────────────────┘
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│  Node.js App    │      │  Python App     │      │  PHP App        │      │  React App      │
+│  (Relay Proxy   │      │  (Default Mode) │      │  (Daemon Mode)  │      │  (Proxy Mode    │
+│   Mode Only)    │      │  Direct Connect │      │  Redis + Events │      │   Client-Side)  │
+│  (Port 3000)    │      │  (Port 5000)    │      │  (Port 8080)    │      │  (Port 3001)    │
+└────────┬────────┘      └────────┬────────┘      └────────┬────────┘      └────────┬────────┘
+         │                        │                        │                        │
+         │ All SDK Traffic        │ Direct                 │ Direct Read            │ All SDK Traffic
+         ▼                        │ Connection             ▼                        ▼
+┌─────────────────┐               │               ┌─────────────────┐      ┌─────────────────┐
+│  Relay Proxy    │───────────────┘               │  Redis          │      │  Relay Proxy    │
+│  (Port 8030)    │─────────────────────────────►│  (Port 6379)    │◄─────│  (Port 8030)    │
+└────────┬────────┘                               └─────────────────┘      └────────┬────────┘
+         │                                                 │                        │
+         │ Events                                          │ Events                 │ Events
+         └─────────────────────────────────────────────────┴────────────────────────┘
                   │
                   ▼
          ┌─────────────────┐
@@ -881,6 +898,7 @@ The relay proxy uses Redis as a persistent data store for caching feature flag c
 - **Node.js**: Single path through Relay Proxy (streaming + events)
 - **Python**: Direct connection to LaunchDarkly (streaming + events)
 - **PHP**: Direct Redis reads for flags, Relay Proxy for events only
+- **React**: Client-side SDK through Relay Proxy (streaming + events)
 - **Simplified Configuration**: No mode switching logic in any application
 - **Optimized Performance**: Each application uses its ideal integration pattern
 
@@ -1233,17 +1251,17 @@ docker exec redis redis-cli KEYS "*"
 
 ### Configuration Comparison
 
-| Feature | Node.js (Proxy Mode) | Python (Default Mode) | PHP (Daemon Mode) |
-|---------|---------------------------|----------------------|-------------------|
-| Flag Source | Relay Proxy | LaunchDarkly Direct | Redis Direct |
-| Real-time Updates | Yes (streaming) | Yes (streaming) | Yes (polling every 5s) |
-| Update Mechanism | Push (instant) | Push (instant) | Poll (5-second delay) |
-| Analytics Events | Yes | Yes | Yes |
-| Network Latency | ~10-50ms | ~50-100ms | <1ms (Redis read) |
-| LaunchDarkly API Calls | Via Relay Proxy | Direct | None (for flags) |
-| Redis Dependency | Optional | None | Required |
-| Relay Proxy Dependency | Required | None | Optional (events only) |
-| Best For | Standard setup, caching | Simple setup, getting started | High-throughput, air-gapped |
+| Feature | Node.js (Proxy Mode) | Python (Default Mode) | PHP (Daemon Mode) | React (Proxy Mode - Client-Side) |
+|---------|---------------------------|----------------------|-------------------|----------------------------------|
+| Flag Source | Relay Proxy | LaunchDarkly Direct | Redis Direct | Relay Proxy |
+| Real-time Updates | Yes (streaming) | Yes (streaming) | Yes (polling every 5s) | Yes (streaming) |
+| Update Mechanism | Push (instant) | Push (instant) | Poll (5-second delay) | Push (instant) |
+| Analytics Events | Yes | Yes | Yes | Yes |
+| Network Latency | ~10-50ms | ~50-100ms | <1ms (Redis read) | ~10-50ms |
+| LaunchDarkly API Calls | Via Relay Proxy | Direct | None (for flags) | Via Relay Proxy |
+| Redis Dependency | Optional | None | Required | Optional |
+| Relay Proxy Dependency | Required | None | Optional (events only) | Required |
+| Best For | Standard setup, caching | Simple setup, getting started | High-throughput, air-gapped | Browser apps, client-side |
 
 ## PHP Daemon Mode Integration
 
@@ -1428,13 +1446,15 @@ curl -X POST http://localhost:8080/api/test-evaluation \
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `LAUNCHDARKLY_SDK_KEY` | Yes | - | Your LaunchDarkly SDK key |
-| `LAUNCHDARKLY_CLIENT_SIDE_ID` | Yes | - | Your LaunchDarkly client-side ID (for dashboard JavaScript SDK) |
+| `LAUNCHDARKLY_CLIENT_SIDE_ID` | Yes | - | Your LaunchDarkly client-side ID (for dashboard JavaScript SDK and React app) |
 | `RELAY_PROXY_CONFIG_KEY` | Yes | - | Relay Proxy configuration key |
 | `PORT` | No | 3000 | Port for the Express server |
 | `RELAY_PROXY_URL` | No | http://relay-proxy:8030 | URL of the Relay Proxy |
 | `REDIS_HOST` | No | redis | Redis hostname (PHP only) |
 | `REDIS_PORT` | No | 6379 | Redis port (PHP only) |
 | `REDIS_PREFIX` | No | - | Redis key prefix (PHP only, must match Relay Proxy environment ID / Client-side ID) |
+| `REACT_PORT` | No | 3001 | Port for the React application |
+| `REACT_API_PORT` | No | 3002 | Port for the React API server (internal) |
 
 ### Obtaining LaunchDarkly Credentials
 
@@ -1464,7 +1484,7 @@ launchdarkly-relay-proxy-enterprise-demo/
 ├── .gitignore            # Git ignore rules
 ├── LICENSE               # MIT License
 ├── Dockerfile            # Docker image for Node.js app
-├── docker-compose.yml    # Multi-container orchestration (6 services)
+├── docker-compose.yml    # Multi-container orchestration (7 services)
 ├── package.json          # Node.js dependencies and scripts
 ├── server.js             # Express server entry point
 ├── load-test.js          # Standalone load testing script
@@ -1483,13 +1503,26 @@ launchdarkly-relay-proxy-enterprise-demo/
 ├── public/
 │   ├── dashboard.html   # Dashboard web UI
 │   └── launchdarkly-logo.svg  # LaunchDarkly logo
-└── php/                 # PHP application
-    ├── Dockerfile       # PHP Docker image
-    ├── composer.json    # PHP dependencies
-    ├── index.php        # PHP application
+├── php/                 # PHP application
+│   ├── Dockerfile       # PHP Docker image
+│   ├── composer.json    # PHP dependencies
+│   ├── index.php        # PHP application
+│   ├── nginx.conf       # Nginx configuration
+│   ├── supervisord.conf # Process manager config
+│   └── www.conf         # PHP-FPM pool config
+└── react-app/           # React application
+    ├── Dockerfile       # React Docker image (multi-stage)
+    ├── package.json     # React dependencies
     ├── nginx.conf       # Nginx configuration
-    ├── supervisord.conf # Process manager config
-    └── www.conf         # PHP-FPM pool config
+    ├── docker-entrypoint.sh  # Container startup script
+    ├── public/          # React public assets
+    └── src/             # React source code
+        ├── components/  # React components
+        ├── contexts/    # React context providers
+        ├── utils/       # Utility functions
+        ├── App.jsx      # Main application component
+        ├── index.jsx    # Entry point with LD provider
+        └── api-server.js  # Express API server
 ```
 
 ## Troubleshooting
@@ -2015,6 +2048,7 @@ MIT License - See LICENSE file for details
 - **LaunchDarkly Docs**: https://docs.launchdarkly.com
 - **Node.js Server SDK**: https://docs.launchdarkly.com/sdk/server-side/node-js
 - **JavaScript Client SDK**: https://docs.launchdarkly.com/sdk/client-side/javascript
+- **React Client SDK**: https://docs.launchdarkly.com/sdk/client-side/react
 - **PHP SDK**: https://docs.launchdarkly.com/sdk/server-side/php
 - **Python SDK**: https://docs.launchdarkly.com/sdk/server-side/python
 - **Relay Proxy**: https://docs.launchdarkly.com/home/relay-proxy

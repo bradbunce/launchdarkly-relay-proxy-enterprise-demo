@@ -1302,6 +1302,9 @@ app.post('/api/python/restart', async (req, res) => {
   }
 });
 
+// React Service start endpoint
+// React container endpoints removed - JavaScript Client panel now uses SDK directly in dashboard
+
 // PHP application status endpoint
 app.get('/api/php/status', async (req, res) => {
   const phpAppUrl = process.env.PHP_APP_URL || 'http://php-app-dev:80';
@@ -1359,8 +1362,19 @@ app.get('/api/python/flag', async (req, res) => {
   const pythonAppUrl = process.env.PYTHON_APP_URL || 'http://python-app-dev:5000';
   
   try {
+    // Forward all query parameters to Python service
+    const queryParams = new URLSearchParams();
+    if (req.query.contextKey) queryParams.append('contextKey', req.query.contextKey);
+    if (req.query.email) queryParams.append('email', req.query.email);
+    if (req.query.name) queryParams.append('name', req.query.name);
+    if (req.query.location) queryParams.append('location', req.query.location);
+    
+    const flagUrl = queryParams.toString()
+      ? `${pythonAppUrl}/api/flag?${queryParams.toString()}`
+      : `${pythonAppUrl}/api/flag`;
+    
     const response = await fetchWithTimeout(
-      `${pythonAppUrl}/api/flag`,
+      flagUrl,
       {},
       5000
     );
@@ -1463,15 +1477,25 @@ app.post('/api/python/sdk-data-store', express.json(), async (req, res) => {
   }
 });
 
+// React container endpoints removed - JavaScript Client panel now uses SDK directly in dashboard
+
 // Python SSE stream proxy endpoint
 app.get('/api/python/message/stream', async (req, res) => {
   const pythonUrl = process.env.PYTHON_APP_URL || 'http://python-app-dev:5000';
   
-  // Get context key from query parameter and forward it
-  const contextKey = req.query.contextKey;
-  const pythonStreamUrl = contextKey 
-    ? `${pythonUrl}/api/message/stream?contextKey=${encodeURIComponent(contextKey)}`
+  // Forward all query parameters to Python service
+  const queryParams = new URLSearchParams();
+  if (req.query.contextKey) queryParams.append('contextKey', req.query.contextKey);
+  if (req.query.email) queryParams.append('email', req.query.email);
+  if (req.query.name) queryParams.append('name', req.query.name);
+  if (req.query.location) queryParams.append('location', req.query.location);
+  
+  const pythonStreamUrl = queryParams.toString()
+    ? `${pythonUrl}/api/message/stream?${queryParams.toString()}`
     : `${pythonUrl}/api/message/stream`;
+  
+  console.log(`[Python SSE Proxy] Forwarding to: ${pythonStreamUrl}`);
+  console.log(`[Python SSE Proxy] Query params:`, req.query);
   
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -1573,7 +1597,7 @@ app.get('/api/flag/dashboard-service-panel-1', async (req, res) => {
     if (!dashboardFlagClient.initialized()) {
       return res.status(503).json({
         error: 'SDK not initialized',
-        value: 'node.js'  // Default fallback
+        value: 'python'  // Default fallback
       });
     }
     
@@ -1588,7 +1612,7 @@ app.get('/api/flag/dashboard-service-panel-1', async (req, res) => {
     const value = await dashboardFlagClient.variation(
       'dashboard-service-panel-1',
       context,
-      'node.js'  // Default value
+      'python'  // Default value
     );
     
     res.json({ value });
@@ -1598,7 +1622,7 @@ app.get('/api/flag/dashboard-service-panel-1', async (req, res) => {
     });
     res.status(500).json({
       error: 'Flag evaluation failed',
-      value: 'node.js'  // Default fallback
+      value: 'python'  // Default fallback
     });
   }
 });

@@ -89,7 +89,7 @@
           diagnosticOptOut: true
         });
         
-        await ldClient.waitForInitialization();
+        await ldClient.waitForInitialization(5);
         log('✅ SDK initialized');
         
         // Test BOTH flags to compare behavior

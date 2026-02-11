@@ -728,6 +728,72 @@ function createApp() {
     return context;
   }
 
+  // Hash calculation endpoint for JavaScript Client
+  // This allows the browser-based JavaScript Client to get hash values
+  // since it can't access the HashValueExposer module directly
+  app.post('/api/calculate-hash', express.json(), async (req, res) => {
+    try {
+      const { contextKey, flagKey } = req.body;
+      
+      if (!contextKey || !flagKey) {
+        return res.status(400).json({ 
+          error: 'contextKey and flagKey are required' 
+        });
+      }
+      
+      const ldClient = getLaunchDarklyClient();
+      
+      if (!ldClient) {
+        return res.status(503).json({ 
+          error: 'LaunchDarkly client not initialized' 
+        });
+      }
+      
+      // Get the flag configuration from SDK data store to extract salt
+      const storeData = await ldClient.allFlagsState({kind: 'user', key: 'temp'}, {clientSideOnly: false, withReasons: false, detailsOnlyForTrackedFlags: false});
+      const allData = storeData.toJSON();
+      const flagConfig = allData[flagKey];
+      
+      if (!flagConfig) {
+        return res.status(404).json({ 
+          error: `Flag '${flagKey}' not found` 
+        });
+      }
+      
+      // Extract salt from flag configuration
+      const salt = flagConfig.salt || flagKey;
+      
+      // Calculate hash value using HashValueExposer
+      const hashResult = hashExposer.expose({
+        flagKey,
+        contextKey,
+        salt
+      });
+      
+      if (hashResult.error) {
+        return res.status(500).json({ 
+          error: 'Failed to calculate hash',
+          details: hashResult.error 
+        });
+      }
+      
+      res.json({
+        success: true,
+        hashInfo: {
+          hashValue: hashResult.hashValue,
+          bucketValue: hashResult.bucketValue,
+          salt: hashResult.salt
+        }
+      });
+    } catch (error) {
+      console.error('[Hash Calculation] Error:', error);
+      res.status(500).json({ 
+        error: 'Internal server error',
+        details: error.message 
+      });
+    }
+  });
+
   // SSE endpoint for Node.js service real-time flag updates
   app.get('/api/node/message/stream', (req, res) => {
     // Get context key from query parameter

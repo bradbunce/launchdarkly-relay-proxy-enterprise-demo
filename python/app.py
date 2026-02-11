@@ -45,10 +45,18 @@ _sdk_initialization_error = None
 
 # Global current context (for dashboard context editor)
 # Generate a random anonymous context key on startup
+# Use multi-context structure with user and container contexts
 current_context = {
-    'kind': 'user',
-    'key': f'python-anon-{uuid.uuid4()}',
-    'anonymous': True
+    'kind': 'multi',
+    'user': {
+        'kind': 'user',
+        'key': f'python-anon-{uuid.uuid4()}',
+        'anonymous': True
+    },
+    'container': {
+        'kind': 'container',
+        'key': 'python-app'
+    }
 }
 
 
@@ -298,27 +306,131 @@ def get_flag_salt(flag_key):
 # ============================================================================
 # Context Creation and Management
 # ============================================================================
+# Context Creation and Management
+# ============================================================================
+
+def buildContext(context_data):
+    """
+    Build a multi-context from user attributes.
+    
+    This helper function constructs a LaunchDarkly multi-context containing both
+    a user context and a container context. The multi-context structure enables
+    flag targeting rules to evaluate based on both user attributes (email, name,
+    location) and container attributes (service identifier).
+    
+    This function matches the pattern used in Node.js and PHP services to ensure
+    consistent flag evaluation behavior across all three services.
+    
+    Args:
+        context_data (dict): Dictionary containing user attributes:
+            - key (str): User context key (required)
+            - email (str, optional): User email address
+            - name (str, optional): User display name
+            - location (str, optional): User location
+            - anonymous (bool, optional): Whether user is anonymous
+    
+    Returns:
+        ldclient.Context: A multi-context containing user and container contexts
+    
+    Raises:
+        ValueError: If context_data is None or missing required 'key' field
+        RuntimeError: If context creation fails
+    
+    Example:
+        >>> context_data = {
+        ...     'key': 'user-123',
+        ...     'email': 'user@example.com',
+        ...     'name': 'John Doe',
+        ...     'location': 'New York'
+        ... }
+        >>> context = buildContext(context_data)
+        >>> flag_value = client.variation("my-flag", context, default_value)
+    """
+    # Validate context_data
+    if context_data is None:
+        raise ValueError("context_data cannot be None")
+    
+    if not isinstance(context_data, dict):
+        raise ValueError(f"context_data must be a dictionary, got {type(context_data).__name__}")
+    
+    # Extract user attributes
+    context_key = context_data.get('key')
+    email = context_data.get('email')
+    name = context_data.get('name')
+    location = context_data.get('location')
+    anonymous = context_data.get('anonymous', False)
+    
+    # Validate context key
+    if not context_key:
+        raise ValueError("context_data must contain a 'key' field")
+    
+    try:
+        # Import Context from ldclient
+        from ldclient import Context
+        
+        # Build user context
+        user_context_builder = Context.builder(context_key)
+        user_context_builder.kind("user")
+        
+        # Set anonymous flag
+        if anonymous:
+            user_context_builder.anonymous(True)
+        
+        # Add email attribute if provided and non-empty
+        if email and isinstance(email, str) and email.strip():
+            user_context_builder.set("email", email.strip())
+        
+        # Add name attribute if provided and non-empty
+        if name and isinstance(name, str) and name.strip():
+            user_context_builder.set("name", name.strip())
+        
+        # Add location attribute if provided and non-empty
+        if location and isinstance(location, str) and location.strip():
+            user_context_builder.set("location", location.strip())
+        
+        user_context = user_context_builder.build()
+        
+        # Build container context with static key "python-app"
+        container_context = Context.builder("python-app").kind("container").build()
+        
+        # Create multi-context combining user and container contexts
+        multi_context = Context.create_multi(user_context, container_context)
+        
+        logger.debug(f"Created multi-context: user={context_key}, container=python-app")
+        
+        return multi_context
+        
+    except Exception as e:
+        error_msg = f"Failed to build multi-context: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise RuntimeError(error_msg) from e
+
 
 def create_context(context_key, email=None, name=None, location=None):
     """
-    Create a LaunchDarkly context for flag evaluation.
+    Create a LaunchDarkly multi-context for flag evaluation.
     
-    Contexts are used to identify users/entities when evaluating feature flags.
-    This function builds a context with the provided attributes and validates
-    the input parameters.
+    This function creates a multi-context containing both a user context and a
+    container context. Multi-contexts enable flag targeting rules to evaluate
+    based on both user attributes (email, name, location) and container attributes
+    (service identifier).
+    
+    The function validates input parameters and builds a multi-context structure
+    that matches the pattern used in Node.js and PHP services.
     
     Args:
-        context_key (str): Unique identifier for the context (required)
+        context_key (str): Unique identifier for the user context (required)
         email (str, optional): User email address
         name (str, optional): User display name
         location (str, optional): User location
     
     Returns:
-        ldclient.Context: A LaunchDarkly context object ready for flag evaluation
+        ldclient.Context: A multi-context containing user and container contexts
     
     Raises:
         ValueError: If context_key is None, empty, or not a string
         TypeError: If email, name, or location are provided but not strings
+        RuntimeError: If context creation fails
     
     Example:
         >>> context = create_context("user-123", email="user@example.com", name="John Doe", location="New York")
@@ -357,33 +469,36 @@ def create_context(context_key, email=None, name=None, location=None):
         # Import Context from ldclient
         from ldclient import Context
         
-        # Create context builder with the key
-        context_builder = Context.builder(context_key.strip())
-        
-        # Set the kind to "user"
-        context_builder.kind("user")
+        # Build user context with the key
+        user_context_builder = Context.builder(context_key.strip())
+        user_context_builder.kind("user")
         
         # Add email attribute if provided and non-empty
         if email and email.strip():
-            context_builder.set("email", email.strip())
+            user_context_builder.set("email", email.strip())
         
         # Add name attribute if provided and non-empty
         if name and name.strip():
-            context_builder.set("name", name.strip())
+            user_context_builder.set("name", name.strip())
         
         # Add location attribute if provided and non-empty
         if location and location.strip():
-            context_builder.set("location", location.strip())
+            user_context_builder.set("location", location.strip())
         
-        # Build and return the context
-        context = context_builder.build()
+        user_context = user_context_builder.build()
         
-        logger.debug(f"Created context: key={context_key}, email={email}, name={name}, location={location}")
+        # Build container context with static key "python-app"
+        container_context = Context.builder("python-app").kind("container").build()
         
-        return context
+        # Create multi-context combining user and container contexts
+        multi_context = Context.create_multi(user_context, container_context)
+        
+        logger.debug(f"Created multi-context: user={context_key}, container=python-app, email={email}, name={name}, location={location}")
+        
+        return multi_context
         
     except Exception as e:
-        error_msg = f"Failed to create context: {str(e)}"
+        error_msg = f"Failed to create multi-context: {str(e)}"
         logger.error(error_msg, exc_info=True)
         raise RuntimeError(error_msg) from e
 
@@ -469,6 +584,9 @@ def evaluate_flag(flag_key, context, default_value):
         
         # Evaluate flag with detailed reason
         detail = client.variation_detail(flag_key, context, default_value)
+        
+        # Log the evaluation result with reason
+        logger.info(f"Flag '{flag_key}' evaluated: value='{detail.value}', reason={detail.reason}")
         
         # The Python SDK returns reason as a dict, not an object
         # Build reason object from the dict
@@ -629,14 +747,25 @@ def flag_endpoint():
         if not context_key:
             global current_context
             if current_context:
-                context_key = current_context.get('key')
-                # Use email, name, and location from current_context if not provided in query
-                if not email and 'email' in current_context:
-                    email = current_context.get('email')
-                if not name and 'name' in current_context:
-                    name = current_context.get('name')
-                if not location and 'location' in current_context:
-                    location = current_context.get('location')
+                # Extract context key from multi-context structure
+                if current_context.get('kind') == 'multi':
+                    context_key = current_context.get('user', {}).get('key')
+                    # Use email, name, and location from user sub-context if not provided in query
+                    if not email and 'email' in current_context.get('user', {}):
+                        email = current_context.get('user', {}).get('email')
+                    if not name and 'name' in current_context.get('user', {}):
+                        name = current_context.get('user', {}).get('name')
+                    if not location and 'location' in current_context.get('user', {}):
+                        location = current_context.get('user', {}).get('location')
+                else:
+                    # Fallback for old single-context format
+                    context_key = current_context.get('key')
+                    if not email and 'email' in current_context:
+                        email = current_context.get('email')
+                    if not name and 'name' in current_context:
+                        name = current_context.get('name')
+                    if not location and 'location' in current_context:
+                        location = current_context.get('location')
                 logger.info(f"Using current_context: {context_key}")
             else:
                 logger.warning("No contextKey provided and no current_context available")
@@ -665,6 +794,7 @@ def flag_endpoint():
         # Create context with provided attributes
         try:
             context = create_context(context_key, email=email, name=name, location=location)
+            logger.info(f"Created context for flag evaluation: key={context_key}, email={email}, name={name}, location={location}")
         except (ValueError, TypeError, RuntimeError) as e:
             logger.error(f"Failed to create context: {str(e)}")
             return jsonify({
@@ -693,28 +823,64 @@ def flag_endpoint():
         
         logger.info(f"Flag 'user-message' evaluated for context '{context_key}': {result['value']}")
         
-        # Add context information to response (convert Context object to dict)
+        # Add context information to response (convert multi-context to dict)
+        # The context is a multi-context, so we need to extract both user and container contexts
         context_dict = {
-            'kind': context.kind if hasattr(context, 'kind') else 'user',
-            'key': context.key if hasattr(context, 'key') else context_key,
-            'anonymous': context.anonymous if hasattr(context, 'anonymous') else False
+            'kind': 'multi'
         }
         
-        # Add optional built-in attributes if present
-        if hasattr(context, 'name') and context.name:
-            context_dict['name'] = context.name
-        if hasattr(context, 'email') and context.email:
-            context_dict['email'] = context.email
-        
-        # Add custom attributes (like location) if present
-        # In Python SDK, custom attributes are accessed via get() method
-        try:
-            if hasattr(context, 'get'):
-                location = context.get('location')
-                if location:
-                    context_dict['location'] = location
-        except Exception as e:
-            logger.debug(f"Could not retrieve custom attributes: {e}")
+        # Try to extract user context
+        if hasattr(context, 'get_individual_context'):
+            user_context = context.get_individual_context('user')
+            if user_context:
+                user_dict = {
+                    'kind': 'user',
+                    'key': user_context.key if hasattr(user_context, 'key') else context_key,
+                    'anonymous': user_context.anonymous if hasattr(user_context, 'anonymous') else False
+                }
+                
+                # Add optional built-in attributes if present
+                if hasattr(user_context, 'name') and user_context.name:
+                    user_dict['name'] = user_context.name
+                if hasattr(user_context, 'email') and user_context.email:
+                    user_dict['email'] = user_context.email
+                
+                # Add custom attributes (like location) if present
+                try:
+                    if hasattr(user_context, 'get'):
+                        location_val = user_context.get('location')
+                        if location_val:
+                            user_dict['location'] = location_val
+                except Exception as e:
+                    logger.debug(f"Could not retrieve custom attributes: {e}")
+                
+                context_dict['user'] = user_dict
+            
+            # Extract container context
+            container_context = context.get_individual_context('container')
+            if container_context:
+                context_dict['container'] = {
+                    'kind': 'container',
+                    'key': container_context.key if hasattr(container_context, 'key') else 'python-app'
+                }
+        else:
+            # Fallback: construct from parameters if SDK doesn't support get_individual_context
+            context_dict['user'] = {
+                'kind': 'user',
+                'key': context_key,
+                'anonymous': not bool(email)
+            }
+            if email:
+                context_dict['user']['email'] = email
+            if name:
+                context_dict['user']['name'] = name
+            if location:
+                context_dict['user']['location'] = location
+            
+            context_dict['container'] = {
+                'kind': 'container',
+                'key': 'python-app'
+            }
         
         result["context"] = context_dict
         
@@ -801,40 +967,61 @@ def context_endpoint():
                 response.headers.add('Access-Control-Allow-Credentials', 'true')
                 return response, 400
             
-            # Create custom context
+            # Create custom multi-context
             new_context = {
-                'kind': 'user',
-                'key': email,
-                'email': email,
-                'anonymous': False
+                'kind': 'multi',
+                'user': {
+                    'kind': 'user',
+                    'key': email,
+                    'email': email,
+                    'anonymous': False
+                },
+                'container': {
+                    'kind': 'container',
+                    'key': 'python-app'
+                }
             }
             
             if name and name.strip():
-                new_context['name'] = name
+                new_context['user']['name'] = name
             if location and location.strip():
-                new_context['location'] = location
+                new_context['user']['location'] = location
         else:
-            # Create anonymous context
+            # Create anonymous multi-context
             # Generate new key only if switching from custom or no context exists
             needs_new_key = (not current_context or 
-                           current_context.get('anonymous') == False or
-                           not current_context.get('key', '').startswith('python-anon-'))
+                           not isinstance(current_context, dict) or
+                           current_context.get('kind') != 'multi' or
+                           not current_context.get('user', {}).get('anonymous', False) or
+                           not current_context.get('user', {}).get('key', '').startswith('python-anon-'))
             
-            context_key = f'python-anon-{uuid.uuid4()}' if needs_new_key else current_context.get('key')
+            if needs_new_key:
+                context_key = f'python-anon-{uuid.uuid4()}'
+            else:
+                context_key = current_context.get('user', {}).get('key', f'python-anon-{uuid.uuid4()}')
             
             new_context = {
-                'kind': 'user',
-                'key': context_key,
-                'anonymous': True
+                'kind': 'multi',
+                'user': {
+                    'kind': 'user',
+                    'key': context_key,
+                    'anonymous': True
+                },
+                'container': {
+                    'kind': 'container',
+                    'key': 'python-app'
+                }
             }
             
             if location and location.strip():
-                new_context['location'] = location
+                new_context['user']['location'] = location
         
         # Update global context
         current_context = new_context
         
-        logger.info(f"Context updated: {context_type} ({new_context['key']})")
+        # Extract user key for logging
+        user_key = new_context.get('user', {}).get('key', 'unknown')
+        logger.info(f"Context updated: {context_type} ({user_key})")
         if location:
             logger.info(f"  Location: {location}")
         
@@ -860,47 +1047,29 @@ def context_endpoint():
 @app.route('/api/sdk-data-store', methods=['GET', 'POST'])
 def get_sdk_data_store():
     """
-    SDK data store endpoint - returns flag state information.
-    
-    Returns flag state information from the SDK. Note: The Python SDK does not
-    expose raw flag configurations (rules, targets, etc.) through its public API.
-    Instead, this endpoint returns flag metadata including versions and evaluation
-    information.
-    
-    Query Parameters:
-        contextKey (optional): Context key for flag evaluation (default: "anonymous")
-    
+    SDK data store endpoint - returns raw flag configurations from the SDK's feature store.
+
+    This endpoint accesses the Python SDK's internal feature store to retrieve
+    detailed flag configurations including rules, variations, targets, and other
+    metadata. This matches the behavior of the Node.js SDK's inspectable store.
+
     Returns:
-        JSON response with flag state information
-        
-    Example Response:
-        {
-            "flags": {
-                "user-message": {
-                    "value": "Hello!",
-                    "version": 5,
-                    "variation": 0,
-                    "reason": {"kind": "FALLTHROUGH"}
-                }
-            },
-            "sdkInitialized": true,
-            "flagCount": 1
-        }
+        JSON response with detailed flag configurations
     """
     try:
         # Check if SDK is initialized
         if not is_sdk_initialized():
-            logger.warning("SDK not initialized, cannot retrieve flag state")
+            logger.warning("SDK not initialized, cannot retrieve flag data")
             return jsonify({
                 "success": False,
                 "error": "SDK not initialized",
                 "sdkInitialized": False,
                 "flags": {}
             }), 503
-        
+
         # Get SDK client
         client = get_ld_client()
-        
+
         if client is None:
             logger.error("SDK client is None")
             return jsonify({
@@ -909,86 +1078,75 @@ def get_sdk_data_store():
                 "sdkInitialized": False,
                 "flags": {}
             }), 503
-        
-        # Get context key from query parameters (optional)
-        context_key = request.args.get('contextKey', 'anonymous')
-        
-        # Create a context for flag state evaluation
+
         try:
-            from ldclient import Context
-            context = Context.builder(context_key).kind("user").build()
-        except Exception as e:
-            logger.error(f"Failed to create context: {str(e)}")
-            return jsonify({
-                "success": False,
-                "error": f"Failed to create context: {str(e)}",
-                "sdkInitialized": True,
-                "flags": {}
-            }), 400
-        
-        # Get all flags state for the context
-        # This returns flag values, versions, variations, and evaluation reasons
-        try:
-            flags_state = client.all_flags_state(
-                context,
-                with_reasons=True,
-                details_only_for_tracked_flags=False
-            )
-            
-            if not flags_state.valid:
-                logger.warning("Flags state is not valid")
+            # Access the feature store from the SDK's config
+            feature_store = client._config.feature_store
+
+            if feature_store is None:
+                logger.error("Feature store not available")
                 return jsonify({
                     "success": False,
-                    "error": "Flags state is not valid",
+                    "error": "Feature store not available",
                     "sdkInitialized": True,
                     "flags": {}
                 }), 500
-            
-            # Convert to JSON dict
-            state_dict = flags_state.to_json_dict()
-            
-            # Extract flag information
+
+            # Import FEATURES kind for querying the store
+            from ldclient.versioned_data_kind import FEATURES
+
+            # Get all flags from the feature store using callback pattern
+            result_container = {'flags': None}
+
+            def callback(result):
+                result_container['flags'] = result
+
+            feature_store.all(FEATURES, callback)
+            raw_flags = result_container['flags']
+
+            if raw_flags is None:
+                logger.warning("No flags retrieved from feature store")
+                return jsonify({
+                    "success": False,
+                    "error": "No flags in feature store",
+                    "sdkInitialized": True,
+                    "flags": {}
+                }), 500
+
+            # Convert FeatureFlag objects to dictionaries
             flags_dict = {}
-            flag_values = {}
-            flag_metadata = state_dict.get('$flagsState', {})
-            
-            # Get flag values (top-level keys that aren't metadata)
-            for key, value in state_dict.items():
-                if not key.startswith('$'):
-                    flag_values[key] = value
-            
-            # Combine values with metadata
-            for flag_key in flag_values.keys():
-                metadata = flag_metadata.get(flag_key, {})
-                flags_dict[flag_key] = {
-                    "value": flag_values[flag_key],
-                    "version": metadata.get("version"),
-                    "variation": metadata.get("variation"),
-                    "reason": metadata.get("reason", {})
-                }
-            
-            logger.info(f"Retrieved state for {len(flags_dict)} flags from SDK")
-            
-            # Return the flags data in the format expected by the dashboard
-            # Match Node.js format: { success: true, flags: {...} }
+            for key, flag_obj in raw_flags.items():
+                # Each flag_obj is a FeatureFlag instance with a to_json_dict() method
+                if hasattr(flag_obj, 'to_json_dict'):
+                    flags_dict[key] = flag_obj.to_json_dict()
+                else:
+                    # Fallback: parse string representation
+                    import json
+                    flags_dict[key] = json.loads(str(flag_obj))
+
+            logger.info(f"Retrieved {len(flags_dict)} flags from feature store")
+
+            # Return the flags data
             response = {
                 "success": True,
                 "flags": flags_dict,
                 "sdkInitialized": True,
-                "flagCount": len(flags_dict)
+                "flagCount": len(flags_dict),
+                "contextIndependent": True,  # Raw configurations are context-independent
+                "storeType": "in-memory-feature-store"
             }
-            
+
             return jsonify(response), 200
-            
+
         except Exception as e:
-            logger.error(f"Error getting flags state: {str(e)}", exc_info=True)
+            logger.error(f"Error accessing feature store: {str(e)}", exc_info=True)
             return jsonify({
                 "success": False,
-                "error": f"Error getting flags state: {str(e)}",
+                "error": f"Error accessing feature store: {str(e)}",
                 "sdkInitialized": True,
                 "flags": {}
             }), 500
-        
+
     except Exception as e:
         # Handle any unexpected errors
         logger.error(f"Error in sdk-data-store endpoint: {str(e)}", exc_info=True)
@@ -1064,6 +1222,7 @@ def sse_endpoint():
         # Create context with provided attributes
         try:
             context = create_context(context_key, email=email, name=name, location=location)
+            logger.info(f"SSE: Created context for flag evaluation: key={context_key}, email={email}, name={name}, location={location}")
         except (ValueError, TypeError, RuntimeError) as e:
             logger.error(f"Failed to create context for SSE: {str(e)}")
             return jsonify({
