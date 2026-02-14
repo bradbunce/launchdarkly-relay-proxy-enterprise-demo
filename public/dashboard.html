@@ -18,17 +18,17 @@
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
       background-color: #f5f5f5;
-      overflow: hidden;
+      overflow: auto;
     }
 
     .dashboard-container {
       width: 2056px;
-      height: 1285px;
+      min-height: 100vh;
       display: grid;
-      grid-template-rows: 771px 514px;
+      grid-template-rows: auto auto;
       grid-template-columns: 1fr;
       gap: 0;
-      overflow: hidden;
+      overflow: auto;
       transition: grid-template-rows 0.3s ease;
     }
     
@@ -42,8 +42,7 @@
       gap: 20px;
       padding: 20px;
       background-color: #f5f5f5;
-      height: 100%;
-      overflow: hidden;
+      min-height: 800px;
     }
     
     /* Panel 1 container holds Node.js, Python, and JavaScript Client panels */
@@ -107,24 +106,22 @@
       border-radius: 8px;
       padding: 20px;
       box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      overflow: hidden;
       position: relative;
       z-index: 10;
       display: flex;
       flex-direction: column;
-      height: 100%;
+      min-height: 600px;
     }
     
     .sdk-cache-display {
-      flex: 1;
-      min-height: 0;
+      flex: 0 0 auto;
       display: flex;
       flex-direction: column;
+      margin-bottom: 20px;
     }
     
     .sdk-cache-display > div:last-child {
-      flex: 1;
-      min-height: 0;
+      /* No height constraint - let content determine height */
     }
 
     .service-header {
@@ -686,7 +683,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Raw flag configurations cached by the SDK (context-independent)
           </div>
-          <div id="node-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
+          <div id="node-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
             <div style="color: #999; font-style: italic;">Waiting for SDK to initialize...</div>
           </div>
         </div>
@@ -752,7 +749,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Raw flag configurations cached by the SDK (context-independent)
           </div>
-          <div id="python-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+          <div id="python-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
             <div style="color: #999; font-style: italic;">Loading...</div>
           </div>
         </div>
@@ -815,7 +812,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Raw flag configurations cached by the SDK (context-independent)
           </div>
-          <div id="javascript-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
+          <div id="javascript-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
             <div style="color: #999; font-style: italic;">Waiting for SDK to initialize...</div>
           </div>
         </div>
@@ -882,7 +879,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Raw flag configurations from Redis (context-independent)
           </div>
-          <div id="php-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
+          <div id="php-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px 10px 30px 10px; border-radius: 4px;">
             <div style="color: #999; font-style: italic;">Waiting for SDK to initialize...</div>
           </div>
         </div>
@@ -947,7 +944,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Internal Go SDK cache served to downstream clients
           </div>
-          <div id="relay-proxy-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 400px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
+          <div id="relay-proxy-cache" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px 10px 30px 10px; border-radius: 4px;">
             <div style="color: #999; font-style: italic;">Waiting for Relay Proxy to initialize...</div>
           </div>
         </div>
@@ -986,7 +983,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Raw flag configurations stored in Redis (context-independent)
           </div>
-          <div id="redis-data-store" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 517px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
+          <div id="redis-data-store" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px 10px 30px 10px; border-radius: 4px;">
             <div style="color: #999; font-style: italic;">Waiting for Redis to initialize...</div>
           </div>
         </div>
@@ -2589,12 +2586,19 @@
       const allFlags = window.jsClientSDK.allFlags();
       const cacheEl = document.getElementById('javascript-sdk-cache');
       if (cacheEl) {
+        let html = '';
+        
+        // Add timestamp to verify updates
+        html += `<div style="font-size: 10px; color: #999; margin-bottom: 8px;">Last updated: ${new Date().toLocaleTimeString()}</div>`;
+        
         if (Object.keys(allFlags).length === 0) {
-          cacheEl.innerHTML = '<div style="color: #999; font-style: italic;">No flags available</div>';
+          html += '<div style="color: #999; font-style: italic;">No flags available</div>';
         } else {
-          cacheEl.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">' + 
+          html += '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">' + 
             JSON.stringify(allFlags, null, 2) + '</pre>';
         }
+        
+        cacheEl.innerHTML = html;
       }
     }
     
@@ -2757,7 +2761,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Raw flag configurations cached by the SDK (context-independent)
           </div>
-          <div id="node-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; transition: max-height 0.3s ease;">
+          <div id="node-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
             <div style="color: #999; font-style: italic;">Waiting for SDK to initialize...</div>
           </div>
         </div>
@@ -2863,7 +2867,7 @@
           <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
             Raw flag configurations cached by the SDK (context-independent)
           </div>
-          <div id="python-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; max-height: 280px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
+          <div id="python-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px; border-radius: 4px;">
             <div style="color: #999; font-style: italic;">Loading...</div>
           </div>
         </div>
@@ -3213,10 +3217,13 @@
           console.log('[fetchPythonSDKData] Processing', flagKeys.length, 'flags');
           
           let html = '';
+          
+          // Add timestamp to verify updates
+          html += `<div style="font-size: 10px; color: #999; margin-bottom: 8px;">Last updated: ${new Date().toLocaleTimeString()}</div>`;
+          
           if (flagKeys.length === 0) {
             html = '<div style="color: #999; font-style: italic;">No flags in SDK data store</div>';
           } else {
-            html = '<div style="font-family: monospace;">';
             flagKeys.forEach(key => {
               const flagValue = flags[key];
               console.log('[fetchPythonSDKData] Processing flag:', key, 'has variations:', !!flagValue.variations, 'length:', flagValue.variations?.length);
@@ -3307,7 +3314,6 @@
               
               html += `</div>`;
             });
-            html += '</div>';
           }
           
           console.log('[fetchPythonSDKData] Setting innerHTML, length:', html.length);

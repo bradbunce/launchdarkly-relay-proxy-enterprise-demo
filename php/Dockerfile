@@ -15,11 +15,10 @@ RUN docker-php-ext-install pcntl
 RUN apk add --no-cache gmp-dev \
     && docker-php-ext-install gmp
 
-# Install Redis PHP extension
-RUN apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
-    && pecl install redis \
-    && docker-php-ext-enable redis \
-    && apk del .build-deps
+# Install Redis PHP extension from Alpine repository
+RUN apk add --no-cache php83-pecl-redis \
+    && ln -s /usr/lib/php83/modules/redis.so /usr/local/lib/php/extensions/no-debug-non-zts-20230831/redis.so \
+    && docker-php-ext-enable redis
 
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
