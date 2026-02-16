@@ -86,11 +86,11 @@ This demo requires **two feature flags** to be created in your LaunchDarkly proj
 1. Create a new flag with key: `terminal-panels`
 2. Set it as a **boolean flag**
 3. Two variations:
-   - `true` (show terminal panels)
-   - `false` (hide terminal panels)
+   - `true` (open terminal panels in separate window)
+   - `false` (close terminal panels window)
 4. Turn the flag **ON** and set default to `true`
 
-**Purpose**: Controls the visibility of terminal log panels in the dashboard UI. When set to `false`, terminal panels are hidden and data store windows expand to use the freed space. Demonstrates real-time UI control via feature flags.
+**Purpose**: Controls whether terminal log panels open in a separate browser window. When set to `true`, a popup window displays real-time container logs for all services. When set to `false`, the terminal window closes automatically. Demonstrates real-time UI control and window management via feature flags.
 
 **Important**: Both flags must exist in your LaunchDarkly project for the demo to function correctly. The application will show fallback values if these flags are missing.
 
@@ -625,14 +625,35 @@ The dashboard maintains persistent SSE connections to both Node.js and PHP servi
 
 This design ensures the demo can run for extended periods without manual intervention or resource issues.
 
-### Container Logs
+### Terminal Panels Window
 
-View real-time logs from containers:
-- **app-dev**: Application and SDK logs
-- **relay-proxy**: Relay proxy connection and event logs
-- **redis monitor**: Live Redis commands showing all operations in real-time
-- **Clear button**: Truncates container logs or clears monitor display
-- **Auto-refresh**: Updates every 2 seconds (logs) or streams live (Redis monitor)
+The dashboard includes a separate browser window for viewing real-time container logs, controlled by the `terminal-panels` feature flag:
+
+**Window Management:**
+- **Automatic Opening**: When the `terminal-panels` flag is `true`, a separate browser window opens automatically
+- **Popup Blocker**: If your browser blocks the popup, you'll see a notification with a manual link
+- **Window Synchronization**: The terminal window automatically switches services when you change Panel 1 in the dashboard
+- **Flag-Controlled**: Toggle the `terminal-panels` flag in LaunchDarkly to show/hide the window
+
+**Terminal Consoles:**
+- **Panel 1 Service** (dynamic): Shows logs for the currently selected service (Node.js, Python, or JavaScript Client)
+  - Node.js: Application and SDK logs from the Node.js container
+  - Python: Application and SDK logs from the Python container
+  - JavaScript Client: Browser console logs from the dashboard (filtered for JavaScript Client messages)
+- **PHP Service**: Application and SDK logs from the PHP container
+- **Relay Proxy**: Relay proxy connection and event logs
+- **Redis Monitor**: Live stream of all Redis commands showing feature flag operations in real-time
+
+**Features:**
+- **Clear Button**: Truncates container logs or clears monitor display
+- **Auto-Refresh**: Updates every 2 seconds (Docker logs) or streams live (Redis monitor, JavaScript console)
+- **Service Switching**: Panel 1 automatically switches between Node.js, Python, and JavaScript based on the `dashboard-service-panel-1` flag
+- **Console Interception**: JavaScript Client mode captures and displays browser console logs from the dashboard
+
+**Browser Requirements:**
+- Allow popups from localhost:8000 for automatic window opening
+- Modern browser with EventSource support for real-time updates
+- Separate window can be manually opened via the notification link if popup is blocked
 
 ### Relay Proxy Status
 
@@ -1928,39 +1949,53 @@ If user.anonymous is true
 **Default Value**: `true` (recommended)
 
 **Variations**:
-- `true`: Show terminal panels (default)
-- `false`: Hide terminal panels and expand data store windows
+- `true`: Open terminal panels in separate browser window (default)
+- `false`: Close terminal panels window
 
 **Purpose**: 
-Controls the visibility of terminal log panels in the dashboard UI. This flag demonstrates:
-- Real-time UI control via feature flags
-- Dynamic layout adjustments based on flag state
+Controls whether terminal log panels open in a separate browser window. This flag demonstrates:
+- Real-time window management via feature flags
+- Cross-window communication and synchronization
 - Instant updates without browser refresh via SSE
-- Boolean flag evaluation with anonymous context
+- Boolean flag evaluation with container context
 
 **Behavior**:
+- **Automatic Window Opening**: When `true`, a popup window opens automatically displaying real-time container logs
+- **Popup Blocker Handling**: If browser blocks the popup, a notification appears with a manual link
+- **Window Synchronization**: Terminal window automatically switches services when Panel 1 changes in the dashboard
 - **Real-time Updates**: Changes apply instantly without browser refresh via SSE
-- **Smooth Transitions**: CSS animations provide smooth show/hide effects
-- **Dynamic Layout**: When hidden, data store windows expand to use freed space
-- **Context**: Evaluated with anonymous context (not user-specific)
+- **Automatic Closing**: When flag changes to `false`, the terminal window closes automatically
+- **Context**: Evaluated with container context (key: 'dashboard-v2')
+
+**Terminal Window Features**:
+- **Four Log Consoles**: Panel 1 service (dynamic), PHP, Relay Proxy, and Redis Monitor
+- **Service Switching**: Panel 1 automatically switches between Node.js, Python, and JavaScript Client
+- **Console Interception**: JavaScript Client mode captures browser console logs from the dashboard
+- **Auto-Refresh**: Docker logs update every 2 seconds, Redis monitor streams live
+- **Clear Buttons**: Each console has a clear button to truncate logs
 
 **Use Cases**:
-- Hide terminal panels during presentations for cleaner UI
-- Focus on data store content without log distractions
-- Demonstrate real-time UI control via feature flags
-- Show dynamic layout adjustments based on flag state
+- View container logs in a dedicated window without cluttering the main dashboard
+- Monitor multiple services simultaneously in a separate screen
+- Demonstrate real-time window management via feature flags
+- Show cross-window communication and synchronization
+- Capture and display JavaScript Client browser console logs
 
 **Technical Details**:
-- Terminal panels occupy 514px of vertical space when visible
-- Data store windows expand by varying amounts when terminals hidden:
-  - Node.js SDK Cache: 280px → 794px
-  - PHP SDK Cache: 280px → 794px
-  - Relay Proxy Cache: 400px → 680px
-  - Redis Data Store: 517px → 750px
-- All panels maintain scrolling functionality in both states
+- Uses `window.open()` to create a popup window
+- Window name: 'terminal-panels' (reuses existing window if already open)
+- Passes LaunchDarkly client-side ID via URL parameter for SDK initialization
+- Terminal window initializes its own LaunchDarkly SDK instance
+- Listens for `dashboard-service-panel-1` flag changes to synchronize Panel 1 service
+- JavaScript Client mode intercepts console.log/warn/error from opener window
+
+**Browser Requirements**:
+- Allow popups from localhost:8000 for automatic window opening
+- Modern browser with EventSource support for real-time updates
+- Cross-origin access between windows (same origin: localhost:8000)
 
 **What Happens Without This Flag**:
-The terminal panels will always be visible (fallback to `true`), and you won't be able to demonstrate dynamic UI control.
+The terminal panels window will always attempt to open (fallback to `true`), and you won't be able to demonstrate dynamic window control.
 
 ### Creating the Flags in LaunchDarkly
 

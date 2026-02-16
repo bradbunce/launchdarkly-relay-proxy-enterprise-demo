@@ -10,5 +10,8 @@ module.exports = {
   ],
   testEnvironmentOptions: {
     customExportConditions: ['node', 'node-addons']
-  }
+  },
+  transformIgnorePatterns: [
+    'node_modules/(?!(@exodus/bytes|jsdom)/)'
+  ]
 };

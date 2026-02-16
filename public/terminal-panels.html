@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terminal Panels - LaunchDarkly Relay Proxy</title>
+  <!-- LaunchDarkly Client-Side ID - Injected from environment variable -->
+  <meta name="ld-client-id" content="${LAUNCHDARKLY_CLIENT_SIDE_ID}">
+  <!-- LaunchDarkly JavaScript SDK v3.9.0 (local) -->
+  <script src="/vendor/ldclient.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background-color: #0a0a0a;
+      overflow: auto;
+    }
+
+    .logs-section {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      padding: 10px;
+      background-color: #0a0a0a;
+      min-height: 100vh;
+    }
+
+    .log-console {
+      background-color: #1e1e1e;
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .log-console-header {
+      background-color: #2d2d2d;
+      padding: 8px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .log-console-header h3 {
+      font-size: 12px;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .log-console-header button {
+      background-color: transparent;
+      color: #999;
+      border: 1px solid #444;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .log-console-header button:hover {
+      background-color: #3d3d3d;
+      color: #fff;
+    }
+
+    .log-console-output {
+      flex: 1;
+      padding: 10px;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      color: #d4d4d4;
+      overflow-y: auto;
+      line-height: 1.5;
+      min-height: 500px;
+    }
+
+    .log-line {
+      margin-bottom: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="logs-section">
+    <!-- Node App Dev Log Console -->
+    <div class="log-console" id="node-app-dev-console">
+      <div class="log-console-header">
+        <h3>node-app-dev</h3>
+        <button id="node-app-dev-clear">Clear</button>
+      </div>
+      <div class="log-console-output" id="node-app-dev-output"></div>
+    </div>
+
+    <!-- PHP App Dev Log Console -->
+    <div class="log-console" id="php-app-dev-console">
+      <div class="log-console-header">
+        <h3>php-app-dev</h3>
+        <button id="php-app-dev-clear">Clear</button>
+      </div>
+      <div class="log-console-output" id="php-app-dev-output"></div>
+    </div>
+
+    <!-- Relay Proxy Log Console -->
+    <div class="log-console" id="relay-proxy-console">
+      <div class="log-console-header">
+        <h3>relay-proxy</h3>
+        <button id="relay-proxy-clear">Clear</button>
+      </div>
+      <div class="log-console-output" id="relay-proxy-output"></div>
+    </div>
+
+    <!-- Redis Monitor Console -->
+    <div class="log-console" id="redis-monitor-console">
+      <div class="log-console-header">
+        <h3>redis-monitor</h3>
+        <button id="redis-monitor-clear">Clear</button>
+      </div>
+      <div class="log-console-output" id="redis-monitor-output"></div>
+    </div>
+  </div>
+
+  <script>
+    // LogConsole class for managing log console displays
+    class LogConsole {
+      constructor(containerId, elementId, updateMethod) {
+        this.containerId = containerId;
+        this.elementId = elementId;
+        this.updateMethod = updateMethod; // 'polling' or 'sse'
+        this.maxLines = 50;
+        this.lines = [];
+        this.eventSource = null;
+        this.pollingInterval = null;
+      }
+      
+      // Start log streaming
+      start() {
+        if (this.updateMethod === 'sse') {
+          this.startSSE();
+        } else {
+          this.startPolling();
+        }
+      }
+      
+      // Start SSE connection (for Redis monitor)
+      startSSE() {
+        this.eventSource = new EventSource(`http://localhost:4000/api/redis/monitor`);
+        this.eventSource.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          // Filter out PING commands (data.command for Redis monitor, data.message for others)
+          const content = data.command || data.message || '';
+          if (!content.toLowerCase().includes('"ping"')) {
+            this.appendLine(content);
+          }
+        };
+        
+        this.eventSource.onerror = (error) => {
+          console.error(`SSE error for ${this.containerId}:`, error);
+          // Close and attempt to reconnect
+          if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+          }
+          // Reconnect after 5 seconds
+          setTimeout(() => {
+            this.startSSE();
+          }, 5000);
+        };
+      }
+      
+      // Start polling (for Docker logs)
+      startPolling() {
+        const poll = async () => {
+          try {
+            const response = await fetch(`http://localhost:4000/api/logs/${this.containerId}`);
+            const data = await response.json();
+            if (data.lines && Array.isArray(data.lines)) {
+              this.setLines(data.lines);
+            }
+          } catch (error) {
+            console.error(`Error polling logs for ${this.containerId}:`, error);
+          }
+        };
+        
+        // Poll immediately, then every 2 seconds
+        poll();
+        this.pollingInterval = setInterval(poll, 2000);
+      }
+      
+      // Append a single line
+      appendLine(line) {
+        this.lines.push(line);
+        if (this.lines.length > this.maxLines) {
+          this.lines.shift();
+        }
+        this.render();
+      }
+      
+      // Set all lines (for polling)
+      setLines(lines) {
+        this.lines = lines.slice(-this.maxLines);
+        this.render();
+      }
+      
+      // Render lines to DOM
+      render() {
+        const element = document.getElementById(this.elementId);
+        if (!element) {
+          console.error(`Element ${this.elementId} not found`);
+          return;
+        }
+        
+        element.innerHTML = this.lines.map(line => {
+          const timestamp = new Date().toLocaleTimeString();
+          return `<div class="log-line">[${timestamp}] ${this.escapeHtml(line)}</div>`;
+        }).join('');
+        
+        // Auto-scroll to bottom
+        element.scrollTop = element.scrollHeight;
+      }
+      
+      // Escape HTML to prevent XSS
+      escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+      
+      // Clear console
+      async clear() {
+        // Clear the display immediately
+        this.lines = [];
+        this.render();
+        
+        // Call backend to actually clear the Docker container logs
+        // (only for Docker log consoles, not for Redis monitor which uses SSE)
+        if (this.updateMethod === 'polling') {
+          try {
+            const response = await fetch(`http://localhost:4000/api/logs/${this.containerId}/clear`, {
+              method: 'POST'
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              console.log(`Container logs cleared: ${data.message}`);
+            } else {
+              const error = await response.json();
+              console.error(`Failed to clear container logs: ${error.error}`);
+            }
+          } catch (error) {
+            console.error(`Error clearing container logs for ${this.containerId}:`, error);
+          }
+        }
+      }
+      
+      // Stop streaming/polling
+      stop() {
+        if (this.eventSource) {
+          this.eventSource.close();
+          this.eventSource = null;
+        }
+        if (this.pollingInterval) {
+          clearInterval(this.pollingInterval);
+          this.pollingInterval = null;
+        }
+      }
+    }
+
+    // Initialize log consoles
+    let nodeAppDevConsole;
+    let phpAppDevConsole;
+    let relayProxyConsole;
+    let redisMonitorConsole;
+
+    // Create log console instances
+    nodeAppDevConsole = new LogConsole('node-app-dev', 'node-app-dev-output', 'polling');
+    phpAppDevConsole = new LogConsole('php-app-dev', 'php-app-dev-output', 'polling');
+    relayProxyConsole = new LogConsole('relay-proxy', 'relay-proxy-output', 'polling');
+    redisMonitorConsole = new LogConsole('redis', 'redis-monitor-output', 'sse');
+
+    // Start log consoles
+    nodeAppDevConsole.start();
+    phpAppDevConsole.start();
+    relayProxyConsole.start();
+    redisMonitorConsole.start();
+
+    // Set up clear button handlers
+    const nodeAppDevClearBtn = document.getElementById('node-app-dev-clear');
+    if (nodeAppDevClearBtn) {
+      nodeAppDevClearBtn.addEventListener('click', () => {
+        nodeAppDevConsole.clear();
+      });
+    }
+
+    const phpAppDevClearBtn = document.getElementById('php-app-dev-clear');
+    if (phpAppDevClearBtn) {
+      phpAppDevClearBtn.addEventListener('click', () => {
+        phpAppDevConsole.clear();
+      });
+    }
+
+    const relayProxyClearBtn = document.getElementById('relay-proxy-clear');
+    if (relayProxyClearBtn) {
+      relayProxyClearBtn.addEventListener('click', () => {
+        relayProxyConsole.clear();
+      });
+    }
+
+    const redisMonitorClearBtn = document.getElementById('redis-monitor-clear');
+    if (redisMonitorClearBtn) {
+      redisMonitorClearBtn.addEventListener('click', () => {
+        redisMonitorConsole.clear();
+      });
+    }
+
+    console.log('[Terminal Panels] All log consoles initialized');
+    
+    // Initialize LaunchDarkly SDK to listen for panel service changes
+    (async function initializeLaunchDarkly() {
+      try {
+        // Try multiple methods to get the client-side ID
+        let clientSideId = null;
+        
+        // Method 1: Get from URL parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        clientSideId = urlParams.get('clientId');
+        if (clientSideId) {
+          console.log('[Terminal Panels] Got client-side ID from URL parameter');
+        }
+        
+        // Method 2: Get from meta tag
+        if (!clientSideId) {
+          clientSideId = document.querySelector('meta[name="ld-client-id"]')?.content;
+          if (clientSideId) {
+            console.log('[Terminal Panels] Got client-side ID from meta tag');
+          }
+        }
+        
+        // Method 3: Get from opener window
+        if (!clientSideId && window.opener) {
+          try {
+            clientSideId = window.opener.document.querySelector('meta[name="ld-client-id"]')?.content;
+            if (clientSideId) {
+              console.log('[Terminal Panels] Got client-side ID from opener window');
+            }
+          } catch (e) {
+            console.warn('[Terminal Panels] Could not access opener window:', e.message);
+          }
+        }
+        
+        if (!clientSideId) {
+          console.warn('[Terminal Panels] LaunchDarkly client-side ID not found, using default panel configuration');
+          return;
+        }
+        
+        console.log('[Terminal Panels] Initializing LaunchDarkly SDK...');
+        
+        // Initialize LaunchDarkly client with container context
+        const ldClient = window.LDClient.initialize(clientSideId, {
+          kind: 'container',
+          key: 'terminal-panels'
+        }, {
+          streaming: true,
+          baseUrl: 'http://localhost:8030',
+          streamUrl: 'http://localhost:8030',
+          eventsUrl: 'http://localhost:8030'
+        });
+        
+        // Wait for SDK to initialize (5 second timeout as recommended by LaunchDarkly)
+        await ldClient.waitForInitialization(5);
+        console.log('[Terminal Panels] LaunchDarkly SDK initialized');
+        
+        // Get initial flag value
+        const initialService = ldClient.variation('dashboard-service-panel-1', 'nodejs');
+        console.log('[Terminal Panels] Initial panel service:', initialService);
+        updatePanel1Service(initialService);
+        
+        // Listen for flag changes
+        ldClient.on('change:dashboard-service-panel-1', (newValue) => {
+          console.log('[Terminal Panels] Panel service changed to:', newValue);
+          updatePanel1Service(newValue);
+        });
+        
+      } catch (error) {
+        console.error('[Terminal Panels] Error initializing LaunchDarkly:', error);
+      }
+    })();
+    
+    // Function to update panel 1 service (node, python, or javascript)
+    function updatePanel1Service(serviceType) {
+      // Find the first console element (it might have any of these IDs depending on current state)
+      let consoleElement = document.getElementById('node-app-dev-console') 
+        || document.getElementById('python-app-dev-console')
+        || document.getElementById('javascript-console');
+      
+      if (!consoleElement) {
+        console.error('[Terminal Panels] Console element not found');
+        return;
+      }
+      
+      // Stop the current console instance
+      if (nodeAppDevConsole) {
+        nodeAppDevConsole.stop();
+        console.log('[Terminal Panels] Stopped previous console instance');
+      }
+      
+      // Update the first console based on service type
+      if (serviceType === 'python') {
+        // Change to python
+        consoleElement.id = 'python-app-dev-console';
+        const header = consoleElement.querySelector('h3');
+        if (header) header.textContent = 'python-app-dev';
+        
+        const clearBtn = consoleElement.querySelector('button');
+        if (clearBtn) {
+          clearBtn.id = 'python-app-dev-clear';
+          // Remove old event listener and add new one
+          const newClearBtn = clearBtn.cloneNode(true);
+          clearBtn.parentNode.replaceChild(newClearBtn, clearBtn);
+          newClearBtn.addEventListener('click', () => {
+            if (nodeAppDevConsole) nodeAppDevConsole.clear();
+          });
+        }
+        
+        const output = consoleElement.querySelector('.log-console-output');
+        if (output) {
+          output.id = 'python-app-dev-output';
+          output.innerHTML = ''; // Clear old content
+        }
+        
+        // Create and start new Python console
+        nodeAppDevConsole = new LogConsole('python-app-dev', 'python-app-dev-output', 'polling');
+        nodeAppDevConsole.start();
+        
+        console.log('[Terminal Panels] Switched panel 1 to Python');
+      } else if (serviceType === 'javascript') {
+        // Change to javascript (browser-based, capture console logs)
+        consoleElement.id = 'javascript-console';
+        const header = consoleElement.querySelector('h3');
+        if (header) header.textContent = 'javascript (browser-based)';
+        
+        const clearBtn = consoleElement.querySelector('button');
+        if (clearBtn) {
+          clearBtn.id = 'javascript-clear';
+          // Remove old event listener and add new one
+          const newClearBtn = clearBtn.cloneNode(true);
+          clearBtn.parentNode.replaceChild(newClearBtn, clearBtn);
+          newClearBtn.addEventListener('click', () => {
+            // Clear the javascript console output
+            const output = document.getElementById('javascript-output');
+            if (output) {
+              output.innerHTML = '<div class="log-line" style="color: #999; font-style: italic;">JavaScript Client console (browser-based)</div>';
+            }
+          });
+        }
+        
+        const output = consoleElement.querySelector('.log-console-output');
+        if (output) {
+          output.id = 'javascript-output';
+          output.innerHTML = '<div class="log-line" style="color: #999; font-style: italic;">JavaScript Client console (browser-based)</div>';
+        }
+        
+        // Set up console interceptor to capture logs from opener window
+        if (window.opener && !window.consoleInterceptorInstalled) {
+          try {
+            // Store original console methods
+            const originalConsole = {
+              log: window.opener.console.log,
+              warn: window.opener.console.warn,
+              error: window.opener.console.error,
+              info: window.opener.console.info
+            };
+            
+            // Helper to add log to terminal panel
+            const addLogToTerminal = (type, args) => {
+              const output = document.getElementById('javascript-output');
+              if (!output) return;
+              
+              const timestamp = new Date().toLocaleTimeString();
+              const message = Array.from(args).map(arg => {
+                if (typeof arg === 'object') {
+                  try {
+                    return JSON.stringify(arg, null, 2);
+                  } catch (e) {
+                    return String(arg);
+                  }
+                }
+                return String(arg);
+              }).join(' ');
+              
+              // Only show JavaScript Client related logs
+              if (message.includes('[JavaScript Client]') || message.includes('JavaScript Client')) {
+                let color = '#d4d4d4';
+                if (type === 'error') color = '#f44336';
+                else if (type === 'warn') color = '#ff9800';
+                else if (type === 'info') color = '#2196f3';
+                
+                const logLine = document.createElement('div');
+                logLine.className = 'log-line';
+                logLine.style.color = color;
+                logLine.textContent = `[${timestamp}] ${message}`;
+                output.appendChild(logLine);
+                
+                // Auto-scroll to bottom
+                output.scrollTop = output.scrollHeight;
+                
+                // Keep only last 50 lines
+                const lines = output.querySelectorAll('.log-line');
+                if (lines.length > 50) {
+                  lines[0].remove();
+                }
+              }
+            };
+            
+            // Intercept console methods
+            window.opener.console.log = function(...args) {
+              originalConsole.log.apply(window.opener.console, args);
+              addLogToTerminal('log', args);
+            };
+            
+            window.opener.console.warn = function(...args) {
+              originalConsole.warn.apply(window.opener.console, args);
+              addLogToTerminal('warn', args);
+            };
+            
+            window.opener.console.error = function(...args) {
+              originalConsole.error.apply(window.opener.console, args);
+              addLogToTerminal('error', args);
+            };
+            
+            window.opener.console.info = function(...args) {
+              originalConsole.info.apply(window.opener.console, args);
+              addLogToTerminal('info', args);
+            };
+            
+            window.consoleInterceptorInstalled = true;
+            console.log('[Terminal Panels] Console interceptor installed for JavaScript Client');
+          } catch (e) {
+            console.warn('[Terminal Panels] Could not install console interceptor:', e.message);
+          }
+        }
+        
+        // No polling console instance needed for javascript (browser-based)
+        nodeAppDevConsole = null;
+        
+        console.log('[Terminal Panels] Switched panel 1 to JavaScript Client');
+      } else {
+        // Default to node (handles both 'node' and 'nodejs')
+        consoleElement.id = 'node-app-dev-console';
+        const header = consoleElement.querySelector('h3');
+        if (header) header.textContent = 'node-app-dev';
+        
+        const clearBtn = consoleElement.querySelector('button');
+        if (clearBtn) {
+          clearBtn.id = 'node-app-dev-clear';
+          // Remove old event listener and add new one
+          const newClearBtn = clearBtn.cloneNode(true);
+          clearBtn.parentNode.replaceChild(newClearBtn, clearBtn);
+          newClearBtn.addEventListener('click', () => {
+            if (nodeAppDevConsole) nodeAppDevConsole.clear();
+          });
+        }
+        
+        const output = consoleElement.querySelector('.log-console-output');
+        if (output) {
+          output.id = 'node-app-dev-output';
+          output.innerHTML = ''; // Clear old content
+        }
+        
+        // Create and start new Node.js console
+        nodeAppDevConsole = new LogConsole('node-app-dev', 'node-app-dev-output', 'polling');
+        nodeAppDevConsole.start();
+        
+        console.log('[Terminal Panels] Switched panel 1 to Node.js');
+      }
+    }
+  </script>
+</body>
+</html>

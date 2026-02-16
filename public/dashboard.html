@@ -24,16 +24,9 @@
     .dashboard-container {
       width: 2056px;
       min-height: 100vh;
-      display: grid;
-      grid-template-rows: auto auto;
-      grid-template-columns: 1fr;
-      gap: 0;
+      display: flex;
+      flex-direction: column;
       overflow: auto;
-      transition: grid-template-rows 0.3s ease;
-    }
-    
-    .dashboard-container.hide-logs {
-      grid-template-rows: 1fr 0px;
     }
 
     .services-section {
@@ -42,7 +35,8 @@
       gap: 20px;
       padding: 20px;
       background-color: #f5f5f5;
-      min-height: 800px;
+      flex: 1;
+      min-height: 100vh;
     }
     
     /* Panel 1 container holds Node.js, Python, and JavaScript Client panels */
@@ -63,43 +57,6 @@
       display: flex;
     }
 
-    .logs-section {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-      padding: 10px;
-      background-color: #0a0a0a;
-      transition: opacity 0.3s ease;
-    }
-    
-    .logs-section.hidden {
-      display: none;
-    }
-    
-    /* Increase data store window heights when terminal panels are hidden */
-    .dashboard-container.hide-logs #node-sdk-cache {
-      max-height: 794px !important; /* 280px + 514px */
-    }
-    
-    .dashboard-container.hide-logs #php-sdk-cache {
-      max-height: 794px !important; /* 280px + 514px */
-    }
-    
-    .dashboard-container.hide-logs #python-sdk-cache {
-      max-height: 794px !important; /* 280px + 514px */
-    }
-    
-    .dashboard-container.hide-logs #javascript-sdk-cache {
-      max-height: 794px !important; /* 280px + 514px */
-    }
-    
-    .dashboard-container.hide-logs #relay-proxy-cache {
-      max-height: 794px !important; /* 400px + 394px - expanded to match others */
-    }
-    
-    .dashboard-container.hide-logs #redis-data-store {
-      max-height: 794px !important; /* 517px + 277px - expanded to match others */
-    }
 
     .service-panel {
       background-color: white;
@@ -615,9 +572,117 @@
       border-radius: 4px;
       font-size: 14px;
     }
+
+    /* Terminal Window Error Notification */
+    .terminal-error-notification {
+      display: none;
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 8px;
+      padding: 16px 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      z-index: 10000;
+      max-width: 600px;
+      animation: slideDown 0.3s ease-out;
+    }
+
+    .terminal-error-notification.show {
+      display: block;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+    }
+
+    .terminal-error-notification-content {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .terminal-error-notification-icon {
+      font-size: 24px;
+      flex-shrink: 0;
+    }
+
+    .terminal-error-notification-body {
+      flex: 1;
+    }
+
+    .terminal-error-notification-title {
+      font-weight: 600;
+      color: #856404;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .terminal-error-notification-message {
+      color: #856404;
+      font-size: 13px;
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+
+    .terminal-error-notification-link {
+      display: inline-block;
+      color: #405BFF;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      margin-right: 12px;
+    }
+
+    .terminal-error-notification-link:hover {
+      text-decoration: underline;
+    }
+
+    .terminal-error-notification-close {
+      background: transparent;
+      border: none;
+      color: #856404;
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+      padding: 0;
+      margin-left: 8px;
+      flex-shrink: 0;
+    }
+
+    .terminal-error-notification-close:hover {
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
+  <!-- Terminal Window Error Notification -->
+  <div id="terminal-error-notification" class="terminal-error-notification">
+    <div class="terminal-error-notification-content">
+      <span class="terminal-error-notification-icon">⚠️</span>
+      <div class="terminal-error-notification-body">
+        <div class="terminal-error-notification-title">Terminal Window Blocked</div>
+        <div class="terminal-error-notification-message">
+          The terminal panels window was blocked by your browser's popup blocker. 
+          Please allow popups for this site to view terminal panels in a separate window.
+        </div>
+        <a href="terminal-panels.html" target="_blank" class="terminal-error-notification-link">
+          Open Terminal Panels Manually
+        </a>
+      </div>
+      <button class="terminal-error-notification-close" onclick="document.getElementById('terminal-error-notification').classList.remove('show')">&times;</button>
+    </div>
+  </div>
+
   <div class="dashboard-container">
     <!-- Services Section (Top 60%) -->
     <div class="services-section">
@@ -990,45 +1055,6 @@
       </div>
     </div>
 
-    <!-- Logs Section (Bottom 40%) -->
-    <div class="logs-section">
-      <!-- Node App Dev Log Console -->
-      <div class="log-console" id="node-app-dev-console">
-        <div class="log-console-header">
-          <h3>node-app-dev</h3>
-          <button id="node-app-dev-clear">Clear</button>
-        </div>
-        <div class="log-console-output" id="node-app-dev-output"></div>
-      </div>
-
-      <!-- PHP App Dev Log Console -->
-      <div class="log-console" id="php-app-dev-console">
-        <div class="log-console-header">
-          <h3>php-app-dev</h3>
-          <button id="php-app-dev-clear">Clear</button>
-        </div>
-        <div class="log-console-output" id="php-app-dev-output"></div>
-      </div>
-
-      <!-- Relay Proxy Log Console -->
-      <div class="log-console" id="relay-proxy-console">
-        <div class="log-console-header">
-          <h3>relay-proxy</h3>
-          <button id="relay-proxy-clear">Clear</button>
-        </div>
-        <div class="log-console-output" id="relay-proxy-output"></div>
-      </div>
-
-      <!-- Redis Monitor Console -->
-      <div class="log-console" id="redis-monitor-console">
-        <div class="log-console-header">
-          <h3>redis-monitor</h3>
-          <button id="redis-monitor-clear">Clear</button>
-        </div>
-        <div class="log-console-output" id="redis-monitor-output"></div>
-      </div>
-
-    </div>
   </div>
 
   <!-- Relay Proxy Status Modal -->
@@ -1257,6 +1283,74 @@
       } else {
         locationInput.placeholder = 'Enter your location (e.g., San Francisco, CA)';
         locationStatus.innerHTML = '<span style="color: #666;">Location auto-detection not supported</span> - <span style="color: #405BFF;">Enter manually</span> <span style="font-size: 11px; color: #999;">(optional)</span>';
+      }
+    }
+    
+    // TerminalWindowManager class for managing terminal panels window
+    class TerminalWindowManager {
+      constructor() {
+        this.terminalWindow = null;
+        this.windowFeatures = 'width=2056,height=600,resizable=yes,scrollbars=yes';
+      }
+      
+      // Open terminal window if not already open
+      openTerminalWindow() {
+        if (this.terminalWindow && !this.terminalWindow.closed) {
+          this.terminalWindow.focus();
+          return;
+        }
+        
+        try {
+          // Get client-side ID from meta tag to pass to terminal window
+          const clientSideId = document.querySelector('meta[name="ld-client-id"]')?.content;
+          const url = clientSideId
+            ? 'terminal-panels.html?clientId=' + encodeURIComponent(clientSideId)
+            : 'terminal-panels.html';
+          
+          this.terminalWindow = window.open(
+            url,
+            'terminal-panels',
+            this.windowFeatures
+          );
+          
+          // Check if window.open() returned null (popup blocked)
+          if (!this.terminalWindow) {
+            console.error('[TerminalWindowManager] window.open() returned null - popup likely blocked');
+            this.showErrorNotification();
+            return;
+          }
+          
+          console.log('[TerminalWindowManager] Terminal window opened successfully');
+        } catch (error) {
+          console.error('[TerminalWindowManager] Error opening terminal window:', error);
+          this.showErrorNotification();
+        }
+      }
+      
+      // Show error notification when window opening fails
+      showErrorNotification() {
+        const notification = document.getElementById('terminal-error-notification');
+        if (notification) {
+          notification.classList.add('show');
+          
+          // Auto-hide after 10 seconds
+          setTimeout(() => {
+            notification.classList.remove('show');
+          }, 10000);
+        }
+      }
+      
+      // Close terminal window if open
+      closeTerminalWindow() {
+        if (this.terminalWindow && !this.terminalWindow.closed) {
+          this.terminalWindow.close();
+          this.terminalWindow = null;
+        }
+      }
+      
+      // Check if terminal window is open
+      isTerminalWindowOpen() {
+        return this.terminalWindow && !this.terminalWindow.closed;
       }
     }
     
@@ -2489,7 +2583,6 @@
 
     // Initialize service panels when DOM is loaded
     let nodePanel, phpPanel, pythonPanel, javascriptClientPanel;
-    let appDevConsole, phpAppDevConsole, relayProxyConsole, redisMonitorConsole;
     
     // Helper function to update pill status indicator
     function updatePillStatus(serviceId, status) {
@@ -2653,7 +2746,8 @@
       }
       
       if (!consoleElement) {
-        console.error('Terminal panel 1 not found (tried node-app-dev-console, python-app-dev-console, and react-app-dev-console)');
+        // Console elements are in the separate terminal window, not in main dashboard
+        console.log('[Dashboard] Terminal consoles are in separate window, skipping panel update');
         return;
       }
       
@@ -3388,6 +3482,10 @@
           await ldClient.waitForInitialization(5);
           console.log('[Dashboard] LaunchDarkly JavaScript SDK initialized');
           
+          // Instantiate TerminalWindowManager after SDK initialization
+          const terminalWindowManager = new TerminalWindowManager();
+          console.log('[Dashboard] TerminalWindowManager instantiated');
+          
           // Add streaming connection verification
           ldClient.on('ready', () => {
             console.log('[Dashboard] SDK ready event fired');
@@ -3513,36 +3611,32 @@
             updatePillStatus('javascript', 'disconnected');
           });
           
+          // Add error listener to main LaunchDarkly SDK
+          ldClient.on('error', (error) => {
+            console.error('[Dashboard] LaunchDarkly SDK error:', error);
+          });
+          
           // Get initial flag value BEFORE rendering
-          showTerminalPanels = ldClient.variation('terminal-panels', true);
+          showTerminalPanels = ldClient.variation('terminal-panels', false);
           console.log('[Dashboard] terminal-panels flag value:', showTerminalPanels);
           
-          // Apply initial state BEFORE any rendering
-          const dashboardContainer = document.querySelector('.dashboard-container');
-          const logsSection = document.querySelector('.logs-section');
-          
-          if (!showTerminalPanels) {
-            console.log('[Dashboard] Hiding terminal panels (initial state)');
-            dashboardContainer.classList.add('hide-logs');
-            logsSection.classList.add('hidden');
-          } else {
-            console.log('[Dashboard] Showing terminal panels (initial state)');
-            dashboardContainer.classList.remove('hide-logs');
-            logsSection.classList.remove('hidden');
+          // Use TerminalWindowManager to open window if flag is true
+          if (showTerminalPanels) {
+            console.log('[Dashboard] Opening terminal window (initial evaluation)');
+            terminalWindowManager.openTerminalWindow();
           }
           
           // Listen for flag changes
           ldClient.on('change:terminal-panels', (newValue) => {
             console.log('[Dashboard] terminal-panels flag changed to:', newValue);
             
-            if (!newValue) {
-              console.log('[Dashboard] Hiding terminal panels');
-              dashboardContainer.classList.add('hide-logs');
-              logsSection.classList.add('hidden');
+            // Use TerminalWindowManager to open or close window based on flag value
+            if (newValue) {
+              console.log('[Dashboard] Opening terminal window (flag changed to true)');
+              terminalWindowManager.openTerminalWindow();
             } else {
-              console.log('[Dashboard] Showing terminal panels');
-              dashboardContainer.classList.remove('hide-logs');
-              logsSection.classList.remove('hidden');
+              console.log('[Dashboard] Closing terminal window (flag changed to false)');
+              terminalWindowManager.closeTerminalWindow();
             }
           });
           
@@ -3627,18 +3721,19 @@
             // Update terminal panel labels
             updateTerminalPanel1(newService);
             
-            // Reinitialize Panel 1 log console to connect to the correct service
-            if (window.initializePanel1LogConsole) {
-              console.log('[Dashboard] Reinitializing Panel 1 log console for service change');
-              window.initializePanel1LogConsole();
-            }
-            
             console.log('[Dashboard] ===== FLAG CHANGE COMPLETE =====');
           });
           
         } catch (error) {
           console.error('[Dashboard] Failed to initialize LaunchDarkly SDK:', error);
-          console.log('[Dashboard] Terminal panels will remain visible');
+          console.log('[Dashboard] Defaulting to flag=false (no terminal window will open)');
+          
+          // Default to false when SDK fails to initialize
+          showTerminalPanels = false;
+          
+          // Still instantiate TerminalWindowManager for potential manual use
+          const terminalWindowManager = new TerminalWindowManager();
+          console.log('[Dashboard] TerminalWindowManager instantiated (SDK initialization failed)');
         }
       }
       
@@ -3687,7 +3782,13 @@
             
             // For anonymous context, keep the existing key or generate new one
             if (context.type === 'anonymous') {
-              ldContext.key = this.currentContext?.key || `javascript-anon-${Math.random().toString(36).substring(7)}`;
+              // If switching from custom to anonymous, generate a new key
+              // If already anonymous, keep the existing key
+              if (this.currentContext?.anonymous === false) {
+                ldContext.key = `javascript-anon-${Math.random().toString(36).substring(7)}`;
+              } else {
+                ldContext.key = this.currentContext?.key || `javascript-anon-${Math.random().toString(36).substring(7)}`;
+              }
               // Add location if provided
               if (context.location) {
                 ldContext.location = context.location;
@@ -5416,122 +5517,10 @@
       pythonPanel.startStatusPolling();
       // JavaScript Client panel doesn't need status polling - runs in browser
       
-      // Function to initialize/reinitialize Panel 1 log console based on current service
-      function initializePanel1LogConsole() {
-        console.log('[Dashboard] Initializing Panel 1 log console for:', window.currentPanelService);
-        
-        // Stop and clean up existing console if it exists
-        if (appDevConsole) {
-          appDevConsole.stop();
-        }
-        
-        // Determine container and output IDs based on current service
-        let panel1ContainerName, panel1OutputId;
-        if (window.currentPanelService === 'python') {
-          panel1ContainerName = 'python-app-dev';
-          panel1OutputId = 'python-app-dev-output';
-        } else if (window.currentPanelService === 'javascript') {
-          // JavaScript Client runs in browser - capture browser console logs
-          panel1ContainerName = null;
-          panel1OutputId = 'javascript-output';
-        } else {
-          panel1ContainerName = 'node-app-dev';
-          panel1OutputId = 'node-app-dev-output';
-        }
-        
-        // Create new log console for Panel 1 (skip if no container)
-        if (panel1ContainerName) {
-          appDevConsole = new LogConsole(panel1ContainerName, panel1OutputId, 'polling');
-          appDevConsole.start();
-        } else {
-          // For JavaScript Client, show captured browser logs
-          const outputEl = document.getElementById(panel1OutputId);
-          if (outputEl && window.javascriptClientLogs && window.javascriptClientLogs.length > 0) {
-            const logHtml = window.javascriptClientLogs.map(log => 
-              `<div class="log-line" style="color: ${log.color};">[${log.timestamp}] ${log.level.toUpperCase()}: ${log.message}</div>`
-            ).join('');
-            outputEl.innerHTML = logHtml;
-          } else if (outputEl) {
-            outputEl.innerHTML = '<div class="log-line" style="color: #999; font-style: italic;">Waiting for JavaScript Client logs...</div>';
-          }
-        }
-        
-        // Set up clear button handler for Panel 1
-        let panel1ClearBtnId;
-        if (window.currentPanelService === 'python') {
-          panel1ClearBtnId = 'python-app-dev-clear';
-        } else if (window.currentPanelService === 'javascript') {
-          panel1ClearBtnId = 'javascript-clear';
-        } else {
-          panel1ClearBtnId = 'node-app-dev-clear';
-        }
-        const appDevClearBtn = document.getElementById(panel1ClearBtnId);
-        if (appDevClearBtn) {
-          // Remove old event listener by cloning the button
-          const newBtn = appDevClearBtn.cloneNode(true);
-          appDevClearBtn.parentNode.replaceChild(newBtn, appDevClearBtn);
-          
-          // Add new event listener
-          newBtn.addEventListener('click', () => {
-            if (appDevConsole) {
-              appDevConsole.clear();
-            } else {
-              // For JavaScript Client, clear the browser logs
-              window.javascriptClientLogs = [];
-              const outputEl = document.getElementById(panel1OutputId);
-              if (outputEl) {
-                outputEl.innerHTML = '<div class="log-line" style="color: #999; font-style: italic;">Logs cleared. Waiting for JavaScript Client logs...</div>';
-              }
-              console.log('[JavaScript Client] Logs cleared');
-            }
-          });
-        }
-        
-        console.log('[Dashboard] Panel 1 log console initialized');
-      }
-      
-      // Make function globally accessible for flag change handler
-      window.initializePanel1LogConsole = initializePanel1LogConsole;
-      
-      // Initialize Panel 1 log console now (on initial page load)
-      initializePanel1LogConsole();
-      
-      // Create other log console instances (Panel 2, 3, 4)
-      phpAppDevConsole = new LogConsole('php-app-dev', 'php-app-dev-output', 'polling');
-      relayProxyConsole = new LogConsole('relay-proxy', 'relay-proxy-output', 'polling');
-      redisMonitorConsole = new LogConsole('redis', 'redis-monitor-output', 'sse');
-      
-      // Start other log consoles
-      phpAppDevConsole.start();
-      relayProxyConsole.start();
-      redisMonitorConsole.start();
-      
       // Initialize relay proxy connection control
       console.log('[Dashboard] Initializing relay proxy connection control...');
       const relayProxyConnectionControl = new RelayProxyConnectionControl();
       console.log('[Dashboard] Relay proxy connection control initialized');
-      
-      // Set up clear button handlers for other panels
-      const phpAppDevClearBtn = document.getElementById('php-app-dev-clear');
-      if (phpAppDevClearBtn) {
-        phpAppDevClearBtn.addEventListener('click', () => {
-          phpAppDevConsole.clear();
-        });
-      }
-      
-      const relayProxyClearBtn = document.getElementById('relay-proxy-clear');
-      if (relayProxyClearBtn) {
-        relayProxyClearBtn.addEventListener('click', () => {
-          relayProxyConsole.clear();
-        });
-      }
-      
-      const redisMonitorClearBtn = document.getElementById('redis-monitor-clear');
-      if (redisMonitorClearBtn) {
-        redisMonitorClearBtn.addEventListener('click', () => {
-          redisMonitorConsole.clear();
-        });
-      }
       
       // Set up context button handlers
       const nodeContextButton = document.getElementById('node-context-button');
@@ -5995,6 +5984,11 @@
       window.addEventListener('beforeunload', () => {
         console.log('Page unloading - cleaning up SSE connections');
         
+        // Close terminal window if open
+        if (terminalWindowManager) {
+          terminalWindowManager.closeTerminalWindow();
+        }
+        
         // Stop service panels
         if (nodePanel) {
           nodePanel.stopStatusPolling();
@@ -6008,12 +6002,6 @@
             phpPanel.eventSource.close();
           }
         }
-        
-        // Stop log consoles
-        if (appDevConsole) appDevConsole.stop();
-        if (phpAppDevConsole) phpAppDevConsole.stop();
-        if (relayProxyConsole) relayProxyConsole.stop();
-        if (redisMonitorConsole) redisMonitorConsole.stop();
       });
       
       // Set up relay proxy status modal handlers

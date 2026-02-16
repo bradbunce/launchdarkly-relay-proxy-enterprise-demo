@@ -219,9 +219,15 @@ if ($requestUri === '/api/context' && $requestMethod === 'POST') {
             $_SESSION['php_service_context']['location'] = $input['location'];
         }
     } else {
+        // Anonymous context
+        // Only generate new key if switching from custom to anonymous or if no context exists
+        $needsNewKey = !isset($_SESSION['php_service_context']) || 
+                       $_SESSION['php_service_context']['type'] === 'custom' ||
+                       !str_starts_with($_SESSION['php_service_context']['key'], 'php-anon-');
+        
         $_SESSION['php_service_context'] = [
             'type' => 'anonymous',
-            'key' => 'php-anon-' . uniqid(),
+            'key' => $needsNewKey ? 'php-anon-' . uniqid() : $_SESSION['php_service_context']['key'],
             'anonymous' => true
         ];
         
