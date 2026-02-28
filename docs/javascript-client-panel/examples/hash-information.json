@@ -1,0 +1,13 @@
+{
+  "contextKey": "user@example.com",
+  "flagKey": "user-message",
+  "salt": "94b881a3be5c449d99dbbe1a92ca3fa0",
+  "hashValue": "1001234567890123",
+  "bucketValue": 0.85104,
+  "explanation": {
+    "hashInput": "user-message.94b881a3be5c449d99dbbe1a92ca3fa0.user@example.com",
+    "algorithm": "SHA-1 (first 60 bits)",
+    "bucketCalculation": "hashValue / 0xFFFFFFFFFFFFFFF (2^60 - 1)",
+    "interpretation": "User falls in the 85.104th percentile. With a 50/50 rollout, this user would receive Variation 1 (bucket >= 0.5)"
+  }
+}

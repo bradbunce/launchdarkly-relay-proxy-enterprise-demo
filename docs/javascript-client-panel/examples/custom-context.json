@@ -1,0 +1,8 @@
+{
+  "kind": "user",
+  "key": "user@example.com",
+  "anonymous": false,
+  "email": "user@example.com",
+  "name": "Jane Doe",
+  "location": "New York"
+}
