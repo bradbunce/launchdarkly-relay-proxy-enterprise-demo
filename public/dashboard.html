@@ -3964,6 +3964,19 @@
           const stopButton = document.getElementById('relay-proxy-stop-button');
           const restartButton = document.getElementById('relay-proxy-restart-button');
           
+          // Check for disconnection first (prioritize over degraded status)
+          if (data.connected === false) {
+            updatePillStatus('relay-proxy', 'disconnected');
+            statusText.textContent = 'Disconnected';
+            statusText.style.color = '#f44336';
+            
+            // Show start button, hide stop and restart when disconnected
+            if (startButton) startButton.style.display = 'flex';
+            if (stopButton) stopButton.style.display = 'none';
+            if (restartButton) restartButton.style.display = 'none';
+            return;
+          }
+          
           // Check for degraded status and determine specific issues
           if (data.status === 'degraded' || data.redisAvailable === false) {
             // Determine what's degraded
