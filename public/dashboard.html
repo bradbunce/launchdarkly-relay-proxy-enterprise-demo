@@ -1382,6 +1382,9 @@
           console.error('[RelayProxyConnectionControl] Toggle element not found');
           return;
         }
+        
+        // Initialize toggle as disabled until connection state is successfully loaded
+        this.toggle.disabled = true;
         if (!this.statusText) {
           console.error('[RelayProxyConnectionControl] Status text element not found');
           return;
