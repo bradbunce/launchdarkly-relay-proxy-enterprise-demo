@@ -173,9 +173,10 @@ async function checkContainerRunning(containerName) {
 // Helper function to resolve LaunchDarkly domains to IP addresses (uses Node dns, no dig required)
 async function resolveLaunchDarklyDomains() {
   const domains = [
-    'clientstream.launchdarkly.com',
-    'app.launchdarkly.com',
-    'events.launchdarkly.com'
+    'stream.launchdarkly.com',        // Server-side streaming (relay proxy)
+    'clientstream.launchdarkly.com',  // Client-side streaming
+    'app.launchdarkly.com',           // Polling endpoint
+    'events.launchdarkly.com'         // Events endpoint
   ];
   
   const ips = new Set();
@@ -367,29 +368,20 @@ app.get('/api/relay-proxy/actual-connection-state', async (req, res) => {
       });
     }
     
-    // Check if there's an iptables rule blocking the relay-proxy (broad or targeted LaunchDarkly-only)
+    // Check if there's an iptables rule blocking the relay-proxy (broad rule only)
     let isManuallyDisconnected = false;
     try {
       const containerIP = await getContainerIP('relay-proxy');
       const subnet = await getDockerNetworkSubnet('launchdarkly-network');
-      const launchDarklyIPs = await resolveLaunchDarklyDomains();
       
-      if (containerIP && (subnet || launchDarklyIPs.length > 0)) {
-        const ns = 'docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i';
-        // Check broad rule (legacy) or targeted LaunchDarkly rules
+      if (containerIP && subnet) {
+        const ns = 'docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i';
+        // Check for broad rule
         try {
-          if (subnet) {
-            await execPromise(`${ns} iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`);
-            isManuallyDisconnected = true;
-          }
+          await execPromise(`${ns} iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`);
+          isManuallyDisconnected = true;
         } catch (e) {
-          for (const ldIP of launchDarklyIPs) {
-            try {
-              await execPromise(`${ns} iptables -C DOCKER-USER -s ${containerIP} -d ${ldIP} -j DROP 2>&1`);
-              isManuallyDisconnected = true;
-              break;
-            } catch (e2) { /* rule doesn't exist for this IP */ }
-          }
+          // Broad rule doesn't exist, relay-proxy is not manually disconnected
         }
       }
     } catch (error) {
@@ -428,12 +420,12 @@ app.get('/api/relay-proxy/actual-connection-state', async (req, res) => {
       }
     }
     
-    // If manually disconnected (iptables rules active), treat as INTERRUPTED regardless of relay state.
-    // This handles page refresh during disconnect: relay may still report VALID for 2-5 min until it
-    // detects the dead stream, but we've blocked the network so user should see "Disconnected".
+    // If manually disconnected (iptables rules active) but relay still reports VALID,
+    // return DISCONNECTING state to indicate transition in progress.
+    // Dashboard will show transitioning status until relay actually detects disconnection.
     if (isManuallyDisconnected && connectionState === 'VALID') {
-      connectionState = 'INTERRUPTED';
-      stateReason = 'Network blocked (relay has not yet detected disconnection)';
+      connectionState = 'DISCONNECTING';
+      stateReason = 'Network blocked - waiting for relay to detect disconnection (5-7 minutes)';
     } else if (isManuallyDisconnected && (connectionState === 'INITIALIZING' || connectionState === 'UNKNOWN')) {
       connectionState = 'INTERRUPTED';
       stateReason = 'Manually disconnected (iptables rule active)';
@@ -442,14 +434,17 @@ app.get('/api/relay-proxy/actual-connection-state', async (req, res) => {
     // Determine if connected and ready to test
     const isConnected = connectionState === 'VALID';
     const isDisconnected = connectionState === 'INTERRUPTED' || connectionState === 'OFF';
+    const isDisconnecting = connectionState === 'DISCONNECTING';
     
     // Ready to test means the state is stable (either fully connected or fully disconnected)
+    // NOT ready during DISCONNECTING transition
     const readyToTest = isConnected || isDisconnected;
     
     return res.json({
       state: connectionState,
       connected: isConnected,
       disconnected: isDisconnected,
+      disconnecting: isDisconnecting,
       stateReason: stateReason,
       readyToTest: readyToTest,
       manuallyDisconnected: isManuallyDisconnected,
@@ -459,6 +454,8 @@ app.get('/api/relay-proxy/actual-connection-state', async (req, res) => {
         ? isManuallyDisconnected 
           ? 'Relay Proxy is manually disconnected (iptables rule active) - ready to test'
           : 'Relay Proxy is disconnected from LaunchDarkly - ready to test'
+        : isDisconnecting
+        ? 'Relay Proxy is disconnecting - network blocked, waiting for relay to detect (5-7 minutes)'
         : 'Relay Proxy connection state is transitioning - wait before testing',
       timestamp: new Date().toISOString()
     });
@@ -2114,7 +2111,7 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
     // 5. Check if already disconnected by checking for existing rule on the Docker host
     try {
       await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`
+        `docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`
       );
       // If command succeeds, rule exists - but we should still restart to ensure disconnection
       console.log('Rule already exists, will restart relay-proxy to ensure disconnection');
@@ -2122,83 +2119,39 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
       // Rule doesn't exist, will add it
     }
     
-    // 6. Kill existing TCP connections from relay-proxy to LaunchDarkly ONLY (not Redis or other internal services)
-    // Using conntrack -D -s X -d Y deletes only connections from relay-proxy to specific LaunchDarkly IPs.
-    // Previously we used conntrack -D -s X which killed ALL connections from relay-proxy, including Redis,
-    // breaking the relay's ability to serve cached flags to SDK clients.
-    console.log('Killing existing TCP connections to LaunchDarkly...');
-    const launchDarklyIPs = await resolveLaunchDarklyDomains();
-    let conntrackSuccess = false;
-    if (launchDarklyIPs.length > 0) {
-      try {
-        for (const ldIP of launchDarklyIPs) {
-          try {
-            const killCmd = `docker exec api-service nsenter -t 1 -m -u -n -i conntrack -D -s ${containerIP} -d ${ldIP} 2>/dev/null || true`;
-            await execPromise(killCmd);
-            console.log(`Killed connections from relay-proxy to LaunchDarkly IP ${ldIP}`);
-          } catch (err) {
-            // Individual IP delete may fail if no connections exist - continue
-          }
-        }
-        conntrackSuccess = true;
-        console.log('Killed existing TCP connections to LaunchDarkly using conntrack');
-      } catch (conntrackError) {
-        console.log('Note: Could not kill connections with conntrack:', conntrackError.message);
-      }
-    } else {
-      console.log('Note: Could not resolve LaunchDarkly IPs for targeted conntrack delete');
-    }
-    if (!conntrackSuccess) {
-      // Fallback: briefly REJECT outbound traffic to send RST (kills streaming connection).
-      // Do NOT add -d ${containerIP} rule - that would RST inbound traffic (browser->relay-proxy).
-      try {
-        await execPromise(
-          `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -I DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
-        );
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await execPromise(
-          `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`
-        );
-        console.log('Sent RST packets as fallback');
-      } catch (rstError) {
-        console.log('Note: Could not send RST packets:', rstError.message);
-      }
+    // 6. Kill existing TCP connections from relay-proxy to external services
+    // Use broad REJECT rule to send RST packets to all external connections
+    // This is more reliable than targeting specific IPs because LaunchDarkly uses dynamic DNS
+    console.log('Killing existing TCP connections to external services...');
+    const nsenter = 'docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i';
+    
+    try {
+      // Add temporary REJECT rule to kill existing connections
+      await execPromise(`${nsenter} iptables -I DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`);
+      console.log('Added temporary REJECT rule to kill existing connections');
+      
+      // Wait for RST packets to be sent
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Remove the temporary REJECT rule
+      await execPromise(`${nsenter} iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`);
+      console.log('Removed temporary REJECT rule');
+    } catch (error) {
+      console.log('Note: Could not kill connections with iptables REJECT:', error.message);
     }
     
-    // 7. Add iptables rules to block relay-proxy -> LaunchDarkly ONLY (not browser responses)
-    // The broad rule "! -d ${subnet}" blocked ALL external traffic including relay-proxy responses
-    // to the browser (JavaScript SDK), causing ERR_CONNECTION_RESET. We must block only
-    // relay-proxy -> LaunchDarkly IPs so the relay can still respond to browser clients.
+    // 7. Add permanent DROP rule to block all external traffic (except internal Docker subnet)
+    // This blocks ALL external traffic from relay-proxy, preventing it from reaching LaunchDarkly
+    // regardless of which IPs LaunchDarkly is using
     try {
-      // First remove any existing rules (broad or targeted)
+      // First remove any existing broad rule
       try {
-        await execPromise(
-          `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>/dev/null || true`
-        );
+        await execPromise(`${nsenter} iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>/dev/null || true`);
       } catch (e) { /* ignore */ }
-      for (const ldIP of launchDarklyIPs) {
-        try {
-          await execPromise(
-            `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} -d ${ldIP} -j DROP 2>/dev/null || true`
-          );
-        } catch (e) { /* ignore */ }
-      }
       
-      if (launchDarklyIPs.length === 0) {
-        return res.status(500).json({
-          success: false,
-          error: 'Could not resolve LaunchDarkly IPs - required for disconnect (must allow relay-proxy to respond to browser)'
-        });
-      }
-      
-      // Add targeted rules: block relay-proxy -> each LaunchDarkly IP
-      const nsenter = 'docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i';
-      for (const ldIP of launchDarklyIPs) {
-        await execPromise(`${nsenter} iptables -I DOCKER-USER -s ${containerIP} -d ${ldIP} -j DROP`);
-        console.log(`Added rule: block ${containerIP} -> ${ldIP}`);
-      }
-      
-      console.log(`Added ${launchDarklyIPs.length} DOCKER-USER rules: block relay-proxy -> LaunchDarkly only`);
+      // Add permanent DROP rule
+      await execPromise(`${nsenter} iptables -I DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP`);
+      console.log(`Added broad DROP rule: block ${containerIP} -> all external traffic (except ${subnet})`);
     } catch (error) {
       return res.status(500).json({
         success: false,
@@ -2230,8 +2183,8 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
       success: true,
       message: 'Relay Proxy disconnected from LaunchDarkly',
       containerIP,
-      blockedIPs: launchDarklyIPs,
-      rule: `Block ${containerIP} -> LaunchDarkly IPs only (allows relay responses to browser)`,
+      subnet,
+      rule: `Block ${containerIP} -> all external traffic (except ${subnet})`,
       timing: {
         disconnectStarted: new Date(disconnectStartTime).toISOString(),
         iptablesApplied: new Date(iptablesAppliedTime).toISOString(),
@@ -2275,25 +2228,29 @@ app.post('/api/relay-proxy/reconnect', async (req, res) => {
     try {
       // List all DROP rules in DOCKER-USER chain
       const { stdout } = await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -S DOCKER-USER 2>&1 | grep "DROP" || true`
+        `docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i iptables -S DOCKER-USER 2>&1 | grep "DROP" || true`
       );
       
       if (stdout.trim()) {
         const rules = stdout.trim().split('\n').filter(r => r.trim());
         console.log(`Found ${rules.length} DROP rules to clean up`);
         
+        // Batch all rule deletions into a single command for performance
+        const nsenter = 'docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i sh -c';
+        let cmd = '';
         for (const rule of rules) {
           // Convert -A to -D for deletion
           const deleteRule = rule.replace('-A DOCKER-USER', '-D DOCKER-USER');
-          try {
-            await execPromise(
-              `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables ${deleteRule}`
-            );
-            rulesRemoved++;
-            console.log(`Removed blocking rule: ${rule}`);
-          } catch (error) {
-            console.error(`Failed to remove rule: ${rule}`, error.message);
-          }
+          // Add each deletion to the batch command with error suppression
+          cmd += `iptables ${deleteRule} 2>/dev/null || true; `;
+        }
+        
+        try {
+          await execPromise(`${nsenter} "${cmd}"`);
+          rulesRemoved = rules.length;
+          console.log(`Removed ${rulesRemoved} blocking rules in batch`);
+        } catch (error) {
+          console.error(`Failed to remove rules in batch:`, error.message);
         }
       }
     } catch (error) {
@@ -2303,11 +2260,11 @@ app.post('/api/relay-proxy/reconnect', async (req, res) => {
     // 4. Verify no rules remain for current relay-proxy IP
     try {
       await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`
+        `docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`
       );
       // Rule still exists, try to remove it specifically
       await execPromise(
-        `docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP`
+        `docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP`
       );
       rulesRemoved++;
       console.log(`Removed specific rule for ${containerIP}`);
@@ -2384,25 +2341,16 @@ app.get('/api/relay-proxy/connection-status', async (req, res) => {
       });
     }
     
-    // 3. Check if blocking rule exists (broad or targeted LaunchDarkly-only)
-    const launchDarklyIPs = await resolveLaunchDarklyDomains();
-    const ns = 'docker run --rm --privileged --net=host --pid=host alpine nsenter -t 1 -m -u -n -i';
+    // 3. Check if blocking rule exists (broad rule only)
+    const ns = 'docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i';
     let hasBlockingRule = false;
     try {
-      if (subnet) {
-        await execPromise(`${ns} iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`);
-        hasBlockingRule = true;
-      }
-    } catch (e) { /* broad rule doesn't exist */ }
-    if (!hasBlockingRule && launchDarklyIPs.length > 0) {
-      for (const ldIP of launchDarklyIPs) {
-        try {
-          await execPromise(`${ns} iptables -C DOCKER-USER -s ${containerIP} -d ${ldIP} -j DROP 2>&1`);
-          hasBlockingRule = true;
-          break;
-        } catch (e2) {}
-      }
+      await execPromise(`${ns} iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`);
+      hasBlockingRule = true;
+    } catch (e) { 
+      // Broad rule doesn't exist, relay-proxy is connected
     }
+    
     return res.status(200).json({
       connected: !hasBlockingRule,
       containerRunning: true,
