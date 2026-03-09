@@ -2818,6 +2818,11 @@
         // Add timestamp to verify updates
         html += `<div style="font-size: 10px; color: #999; margin-bottom: 8px;">Last updated: ${new Date().toLocaleTimeString()}</div>`;
         
+        // Show warning if in offline mode
+        if (window.jsClientOfflineMode) {
+          html += '<div style="color: #ff9800; font-style: italic; margin-bottom: 8px; padding: 8px; background-color: #fff3e0; border-radius: 4px;">⚠️ Offline - Data may be stale</div>';
+        }
+        
         if (Object.keys(allFlags).length === 0) {
           html += '<div style="color: #999; font-style: italic;">No flags available</div>';
         } else {
@@ -3742,14 +3747,30 @@
             console.log('[JavaScript Client] SDK ready - connection established');
             updatePillStatus('javascript', 'connected');
             
-            // Clear offline mode flag when SDK reconnects
-            if (window.jsClientOfflineMode) {
+            // If we were in offline mode with a pending context change, retry identify
+            if (window.jsClientOfflineMode && window.jsClientPendingContext) {
+              console.log('[JavaScript Client] Reconnected - retrying identify with pending context:', window.jsClientPendingContext);
+              
+              // Retry the identify call now that we're connected
+              window.jsClientSDK.identify(window.jsClientPendingContext)
+                .then(() => {
+                  console.log('[JavaScript Client] Successfully identified with pending context after reconnection');
+                  window.jsClientOfflineMode = false;
+                  window.jsClientPendingContext = null;
+                  updateJavaScriptClientPanel(true);
+                })
+                .catch((error) => {
+                  console.error('[JavaScript Client] Failed to identify after reconnection:', error);
+                });
+            } else if (window.jsClientOfflineMode) {
+              // Clear offline mode even if no pending context
               console.log('[JavaScript Client] Reconnected - clearing offline mode');
               window.jsClientOfflineMode = false;
+              updateJavaScriptClientPanel(true);
+            } else {
+              // Normal ready event (initial connection)
+              updateJavaScriptClientPanel(true);
             }
-            
-            // Re-evaluate flags with current context
-            updateJavaScriptClientPanel(true);
           });
           
           // Listen for SDK flag changes
@@ -3758,7 +3779,9 @@
             
             // Clear offline mode on successful flag change (means we're connected)
             if (window.jsClientOfflineMode) {
+              console.log('[JavaScript Client] Flag change received - clearing offline mode');
               window.jsClientOfflineMode = false;
+              window.jsClientPendingContext = null;
             }
             
             updateJavaScriptClientPanel(true);
@@ -3952,14 +3975,19 @@
               ]);
               identifySucceeded = true;
               console.log('✓ JavaScript Client context updated successfully:', ldContext);
+              
+              // Clear any pending context since identify succeeded
+              window.jsClientPendingContext = null;
             } catch (identifyError) {
               // SDK identify failed (likely network error)
-              // When context changes and server is unreachable, we should show fallback
+              // Store the pending context so we can retry when reconnected
               console.warn('⚠️ JavaScript Client identify failed (Relay Proxy may be down):', identifyError.message);
               console.log('→ Flag evaluations will return fallback values for the new context');
+              console.log('→ Will retry identify when connection is restored');
               
               // Mark that we're in offline mode with a new context
               window.jsClientOfflineMode = true;
+              window.jsClientPendingContext = ldContext;
             }
             
             // Update stored context regardless of identify success
