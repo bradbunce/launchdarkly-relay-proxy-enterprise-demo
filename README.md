@@ -410,24 +410,32 @@ This helps you quickly identify whether the issue is with LaunchDarkly connectiv
 - **Container Restart**: Restarting the Relay Proxy container maintains the current squid-proxy state
 - **Requires Docker Access**: API service container must have Docker socket access (already configured in docker-compose.yml)
 
-**Auto-Configuration and Offline Resilience:**
+**Auto-Configuration - Relay Proxy Enterprise Feature:**
 
-This demo uses the Relay Proxy's **auto-configuration mode** (`AUTO_CONFIG_KEY`), which provides convenience but has important implications for offline resilience:
+This demo uses the Relay Proxy's **auto-configuration mode** (`AUTO_CONFIG_KEY`), a key feature of **LaunchDarkly Relay Proxy Enterprise**. This feature is used specifically to demonstrate the full capabilities of the Enterprise version.
+
+**Why We Use Auto-Configuration:**
+- **Enterprise Feature Showcase**: Auto-configuration is exclusive to Relay Proxy Enterprise and demonstrates its advanced capabilities
+- **Simplified Setup**: Single `RELAY_PROXY_CONFIG_KEY` environment variable automatically configures all environments
+- **Dynamic Environment Discovery**: Automatically detects and configures all environments associated with your account
+- **Zero Manual Configuration**: No need to manually specify environment IDs, SDK keys, or Redis settings
+- **Production-Ready Pattern**: Demonstrates how Enterprise customers deploy the Relay Proxy in real-world scenarios
 
 **How Auto-Config Works:**
-1. On startup, the Relay Proxy connects to LaunchDarkly to fetch environment configurations
-2. Once configured, it initializes each environment's SDK client
-3. Each SDK client reads from Redis (if available) and streams updates from LaunchDarkly
-4. The Relay Proxy serves flag data to downstream SDK clients
+1. On startup, the Relay Proxy connects to LaunchDarkly using the `AUTO_CONFIG_KEY`
+2. Downloads configuration for all environments (SDK keys, Redis settings, etc.)
+3. Initializes each environment's SDK client automatically
+4. Each SDK client reads from Redis (if available) and streams updates from LaunchDarkly
+5. The Relay Proxy serves flag data to downstream SDK clients
 
-**Critical Limitation - Why We Can't Restart During Disconnection:**
+**Connection Management Behavior:**
 
 The disconnect feature stops the squid-proxy container to block network traffic **without restarting the relay-proxy container**. This is intentional because:
 
 **Auto-Config Mode Dependency:**
-- This demo uses **auto-config mode** for easy setup (single `RELAY_PROXY_CONFIG_KEY` environment variable)
 - In auto-config mode, the Relay Proxy **must connect to LaunchDarkly on startup** to download its configuration
 - The configuration tells the Relay Proxy which environments to serve and that it should use Redis as a data store
+- This is the standard behavior for Enterprise deployments using auto-configuration
 
 **What Happens If We Restart While Disconnected:**
 1. ❌ Relay Proxy starts but **cannot reach LaunchDarkly** (network is blocked)
@@ -441,20 +449,22 @@ The disconnect feature stops the squid-proxy container to block network traffic 
 - The Relay Proxy doesn't persist auto-config data to disk for offline restarts
 - Without environment configuration, the Relay Proxy doesn't know which Redis keys to read
 
-**Alternative - Manual Configuration:**
-If the Relay Proxy were manually configured with Redis settings (instead of auto-config), it would:
+**Alternative Configuration Approach:**
+While manual configuration is possible, this demo intentionally uses auto-configuration to showcase the Enterprise feature. Manual configuration would:
 - ✅ Read configuration from environment variables on startup
 - ✅ **Immediately connect to Redis** and load cached flags
 - ✅ Serve cached data even while disconnected from LaunchDarkly
 - ✅ Support instant reconnection via container restart
+- ❌ Require manual specification of all environment IDs and settings
+- ❌ Not demonstrate the Enterprise auto-configuration capability
 
-**Trade-off:**
-- **Auto-config mode** (this demo): Easy setup, but reconnection has exponential backoff delay (3-60+ seconds)
-- **Manual config mode**: More complex setup, but supports instant reconnection via restart
+**Demo Design Choice:**
+- **Auto-config mode** (this demo): Showcases Relay Proxy Enterprise features with simplified setup
+- **Manual config mode**: Available but not used, as it doesn't demonstrate Enterprise capabilities
 
 **Recommended Usage:**
 - ✅ **Disconnect without restart**: Relay Proxy continues serving from cache and Redis (works perfectly)
-- ❌ **Disconnect + restart**: Relay Proxy cannot initialize (avoid this scenario)
+- ❌ **Disconnect + restart**: Relay Proxy cannot initialize (avoid this scenario in auto-config mode)
 - ✅ **Production scenario**: Network outages rarely coincide with container restarts
 
 **SDK Mode Comparison During Disconnection:**
@@ -487,14 +497,13 @@ If the Relay Proxy were manually configured with Redis settings (instead of auto
 
 **Alternative: Manual Environment Configuration**
 
-For maximum offline resilience, you could use manual environment configuration instead of auto-config:
-- Configure environments explicitly in a config file or environment variables
-- Relay Proxy can initialize offline using the static configuration
-- Both Proxy Mode and Daemon Mode SDKs work after restart
-- Trade-off: Lose the convenience of auto-config (must manually update when adding environments)
+While manual environment configuration is possible, this demo intentionally uses auto-configuration to showcase the **Relay Proxy Enterprise** feature:
+- Manual config: Requires explicit environment IDs, SDK keys, and Redis settings
+- Auto-config: Automatically discovers and configures all environments
+- Trade-off: Manual config provides offline resilience, but doesn't demonstrate Enterprise capabilities
 
 **For This Demo:**
-- We use auto-config for ease of setup
+- We use **auto-config to showcase Relay Proxy Enterprise features**
 - The disconnect toggle is designed to simulate network issues **without restarting containers**
 - This reflects real-world scenarios where network outages don't typically coincide with service restarts
 - Both SDK modes demonstrate their respective strengths: Node.js shows streaming updates, PHP shows maximum resilience
