@@ -86,6 +86,9 @@ function createApp() {
     }
   }));
 
+  // Parse JSON request bodies globally
+  app.use(express.json());
+
   // Middleware to initialize session context
   app.use((req, res, next) => {
     if (!req.session.nodeServiceContext) {
