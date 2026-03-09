@@ -753,31 +753,56 @@ function createApp() {
       
       // Fetch flag data from Relay Proxy's client-side SDK endpoint
       const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
-      const flagDataUrl = `${relayProxyUrl}/sdk/evalx/${clientSideId}/contexts/${encodeURIComponent(contextKey)}`;
+      
+      // The Relay Proxy client-side endpoint format is:
+      // /sdk/evalx/{envId}/contexts/{base64EncodedContext}
+      // We need to create a proper context object and base64 encode it
+      const contextObj = {
+        kind: 'user',
+        key: contextKey
+      };
+      
+      const contextBase64 = Buffer.from(JSON.stringify(contextObj)).toString('base64');
+      const flagDataUrl = `${relayProxyUrl}/sdk/evalx/${clientSideId}/contexts/${contextBase64}`;
+      
+      console.log('[Client-Side Hash] Fetching from URL:', flagDataUrl);
       
       try {
         const response = await fetch(flagDataUrl);
         
+        console.log('[Client-Side Hash] Relay Proxy response status:', response.status);
+        
         if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[Client-Side Hash] Relay Proxy error:', errorText);
           return res.status(response.status).json({ 
-            error: `Failed to fetch flag data from Relay Proxy: ${response.statusText}` 
+            error: `Failed to fetch flag data from Relay Proxy: ${response.statusText}`,
+            details: errorText
           });
         }
         
         const flagData = await response.json();
         
+        console.log('[Client-Side Hash] Flag data keys:', Object.keys(flagData));
+        
         // Find the specific flag in the response
         const flagConfig = flagData[flagKey];
         
         if (!flagConfig) {
+          console.error('[Client-Side Hash] Flag not found in response');
           return res.status(404).json({ 
-            error: `Flag '${flagKey}' not found in client-side flag data` 
+            error: `Flag '${flagKey}' not found in client-side flag data`,
+            availableFlags: Object.keys(flagData)
           });
         }
+        
+        console.log('[Client-Side Hash] Flag config:', flagConfig);
         
         // Extract salt from flag configuration
         // Client-side flag data structure might have salt in different location
         const salt = flagConfig.salt || flagConfig.trackEvents?.salt || flagKey;
+        
+        console.log('[Client-Side Hash] Using salt:', salt);
         
         // Calculate hash value using HashValueExposer
         const hashResult = hashExposer.expose({
