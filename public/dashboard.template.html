@@ -445,6 +445,79 @@
       background-color: #e8e8e8;
     }
 
+    /* Connection Status and Control Styles */
+    .connection-status-section {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .connection-status-section h4 {
+      font-size: 14px;
+      color: #333;
+      margin-bottom: 10px;
+      font-weight: 600;
+    }
+
+    .connection-control-section {
+      margin-top: 15px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .connection-control-section h4 {
+      font-size: 14px;
+      color: #333;
+      margin-bottom: 10px;
+      font-weight: 600;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border-radius: 6px;
+      font-weight: 600;
+      margin: 10px 0;
+    }
+
+    .status-indicator.connected {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .status-indicator.disconnected {
+      background: #ffebee;
+      color: #d32f2f;
+    }
+
+    .status-indicator.transitioning {
+      background: #fff3e0;
+      color: #f57c00;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    .status-indicator.unknown {
+      background: #f5f5f5;
+      color: #757575;
+    }
+
+    .status-indicator .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .status-description,
+    .control-description {
+      font-size: 12px;
+      color: #666;
+      margin-top: 5px;
+    }
+
     /* Connection Control Styles */
     .connection-control {
       margin-top: 20px;
@@ -457,7 +530,11 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      cursor: pointer;
+    }
+
+    .toggle-label {
+      font-weight: 500;
+      color: #333;
     }
 
     .connection-label {
@@ -988,18 +1065,31 @@
           </button>
         </div>
         
+        <!-- Read-only Connection Status Indicator -->
+        <div class="connection-status-section">
+          <h4>Connection Status</h4>
+          <div id="relay-proxy-connection-status" class="status-indicator unknown">
+            <span class="status-dot"></span>
+            <span id="connection-status-text">Unknown</span>
+          </div>
+          <div class="status-description">
+            Real-time status detected from relay proxy logs
+          </div>
+        </div>
+
         <!-- Connection Control Section -->
-        <div class="connection-control">
-          <label class="connection-toggle">
-            <span class="connection-label">Connection to LaunchDarkly:</span>
-            <div class="toggle-switch">
-              <input type="checkbox" id="relay-connection-toggle" checked>
+        <div class="connection-control-section">
+          <h4>Connection Control</h4>
+          <div class="connection-toggle">
+            <label class="toggle-switch">
+              <input type="checkbox" id="relay-proxy-toggle" checked>
               <span class="toggle-slider"></span>
-            </div>
-            <span id="connection-status-text" class="status-text connected">
-              Connected
-            </span>
-          </label>
+            </label>
+            <span id="relay-proxy-toggle-label" class="toggle-label">Disconnect</span>
+          </div>
+          <div class="control-description">
+            Initiate disconnect or reconnect actions
+          </div>
         </div>
         
         <div id="connection-error" class="error-message" style="display: none;"></div>
@@ -1363,7 +1453,9 @@
     // RelayProxyConnectionControl class for managing relay proxy connection toggle
     class RelayProxyConnectionControl {
       constructor() {
-        this.toggle = document.getElementById('relay-connection-toggle');
+        this.toggle = document.getElementById('relay-proxy-toggle');
+        this.toggleLabel = document.getElementById('relay-proxy-toggle-label');
+        this.statusIndicator = document.getElementById('relay-proxy-connection-status');
         this.statusText = document.getElementById('connection-status-text');
         this.errorDiv = document.getElementById('connection-error');
         this.waitingDetailsDiv = document.getElementById('connection-waiting-details');
@@ -1389,6 +1481,10 @@
           console.error('[RelayProxyConnectionControl] Status text element not found');
           return;
         }
+        if (!this.statusIndicator) {
+          console.error('[RelayProxyConnectionControl] Status indicator element not found');
+          return;
+        }
         if (!this.errorDiv) {
           console.error('[RelayProxyConnectionControl] Error div element not found');
           return;
@@ -1412,20 +1508,19 @@
       
       async loadConnectionStatus() {
         try {
-          // Use the actual connection state endpoint to get real Relay Proxy state
-          const response = await fetch('http://localhost:4000/api/relay-proxy/actual-connection-state');
+          // Use the log-based connection state endpoint
+          const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/relay-proxy/connection-state');
           const data = await response.json();
           
-          // Log state changes
+          // Log state changes only
           if (this.lastState !== data.state) {
             console.log(`[Connection State] Changed from ${this.lastState} to ${data.state}`);
             this.lastState = data.state;
             
             // If we're in a user-initiated transition and the state matches what we expected, clear the flag
             if (this.userInitiatedTransition) {
-              if ((this.expectedState === 'connected' && (data.state === 'VALID')) ||
-                  (this.expectedState === 'disconnected' && (data.state === 'INTERRUPTED' || data.state === 'OFF'))) {
-                console.log('[Connection State] Transition complete, clearing user-initiated flag');
+              if ((this.expectedState === 'connected' && data.state === 'connected') ||
+                  (this.expectedState === 'disconnected' && data.state === 'disconnected')) {
                 this.userInitiatedTransition = false;
                 this.expectedState = null;
               }
@@ -1445,6 +1540,13 @@
           return;
         }
         
+        // Check if toggle is disabled
+        if (this.toggle.disabled) {
+          event.preventDefault();
+          this.showError('Cannot change connection state while a transition is in progress. Please wait.');
+          return;
+        }
+        
         this.isUpdating = true;
         this.hideError();
         
@@ -1457,24 +1559,26 @@
           // Mark that user initiated this transition
           this.userInitiatedTransition = true;
           this.expectedState = shouldConnect ? 'connected' : 'disconnected';
-          
-          // Show transitioning state immediately
           this.transitionStartTime = Date.now();
-          this.updateTransitioningState(shouldConnect);
           
-          const response = await fetch(`http://localhost:4000${endpoint}`, {
+          const response = await fetch(`http://localhost:${API_SERVICE_PORT}${endpoint}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
           });
           
           const data = await response.json();
           
+          // Handle 409 Conflict (concurrent action)
+          if (response.status === 409) {
+            throw new Error(data.message || 'Another action is already in progress. Please wait.');
+          }
+          
           if (!data.success) {
             throw new Error(data.error || 'Operation failed');
           }
           
           // The polling will update the UI with the actual state
-          console.log(`[Connection Toggle] ${shouldConnect ? 'Reconnect' : 'Disconnect'} initiated. Waiting for Relay Proxy to detect state change...`);
+          console.log(`[Connection Toggle] ${shouldConnect ? 'Reconnect' : 'Disconnect'} initiated. Waiting for log monitoring to confirm state change...`);
           
         } catch (error) {
           console.error('Connection toggle failed:', error);
@@ -1482,36 +1586,23 @@
           
           // Revert toggle to previous state
           event.target.checked = !shouldConnect;
+          this.userInitiatedTransition = false;
+          this.expectedState = null;
           
         } finally {
           this.isUpdating = false;
         }
       }
       
-      updateTransitioningState(connecting) {
-        if (!this.statusText || !this.toggle) return;
-        
-        // Disable toggle during transition
-        this.toggle.disabled = true;
-        
-        if (connecting) {
-          this.statusText.textContent = 'Reconnecting...';
-          this.statusText.className = 'status-text transitioning';
-          this.statusText.title = 'Waiting for Relay Proxy to reconnect - please wait';
-        } else {
-          this.statusText.textContent = 'Disconnecting...';
-          this.statusText.className = 'status-text transitioning';
-          this.statusText.title = 'Waiting for Relay Proxy to detect disconnection - please wait';
-        }
-      }
       
       updateWaitingDetails(data, waitingForDisconnect) {
         if (!this.waitingDetailsDiv || !this.waitingStateSpan || !this.waitingDetailSpan || !this.waitingElapsedSpan) return;
         
         this.waitingDetailsDiv.style.display = 'block';
         this.waitingStateSpan.textContent = data.state || '—';
-        this.waitingDetailSpan.textContent = data.stateReason || 
-          (waitingForDisconnect ? 'Relay still reports connected (streaming timeout ~5–7 min)' : 'Waiting for Relay Proxy to reconnect') || '—';
+        this.waitingDetailSpan.textContent = data.pendingAction ? 
+          `Waiting for log monitoring to confirm ${data.pendingAction}` : 
+          (waitingForDisconnect ? 'Waiting for disconnection confirmation from logs' : 'Waiting for connection confirmation from logs');
         
         const elapsedMs = this.transitionStartTime ? Date.now() - this.transitionStartTime : 0;
         const elapsedSec = Math.floor(elapsedMs / 1000);
@@ -1525,123 +1616,79 @@
       }
       
       updateUI(data) {
-        
-        if (!this.toggle || !this.statusText) {
+        if (!this.toggle || !this.statusText || !this.statusIndicator) {
           console.error('[RelayProxyConnectionControl] Cannot update UI - elements not found');
           return;
         }
         
-        // If user initiated a transition, keep showing transitioning state until actual state changes
-        if (this.userInitiatedTransition) {
-          
-          // Check if we're still waiting for the expected state
-          const isWaitingForDisconnect = this.expectedState === 'disconnected' && 
-                                         (data.state === 'VALID');
-          const isWaitingForConnect = this.expectedState === 'connected' && 
-                                      (data.state === 'INTERRUPTED' || data.state === 'OFF');
-          
-          if (isWaitingForDisconnect || isWaitingForConnect) {
-            // Show waiting details: state, detail, elapsed time
-            this.updateWaitingDetails(data, isWaitingForDisconnect);
-            console.log(`[Connection State] Still waiting for ${this.expectedState} state (current: ${data.state})`);
-            return;
-          } else {
-            // Transition complete - hide waiting details
-            this.hideWaitingDetails();
-          }
-        }
+        // Update status indicator (read-only display)
+        this.updateStatusIndicator(data);
         
-        // Handle container stopped state
-        if (data.state === 'CONTAINER_STOPPED') {
-          this.toggle.disabled = true;
+        // Update toggle control (action mechanism)
+        this.updateToggleControl(data);
+        
+        // Show/hide relay proxy cache based on connection state
+        this.updateCacheVisibility(data);
+      }
+      
+      updateCacheVisibility(data) {
+        const cacheElement = document.getElementById('relay-proxy-cache');
+        if (!cacheElement) return;
+        
+        // Get the parent container (.sdk-cache-display)
+        const cacheContainer = cacheElement.closest('.sdk-cache-display');
+        if (!cacheContainer) return;
+        
+        // Only hide cache when relay proxy container is stopped (not running)
+        // If relay proxy is running but disconnected (squid proxy stopped), still show cache
+        if (data.relayProxyRunning === false) {
+          // Relay proxy container is stopped - hide cache
+          cacheContainer.style.display = 'none';
+        } else {
+          // Relay proxy container is running - show cache
+          cacheContainer.style.display = 'block';
+        }
+      }
+      
+      updateStatusIndicator(data) {
+        if (!this.statusIndicator || !this.statusText) return;
+        
+        // If there's a pending action, show transitioning state
+        if (data.pendingAction) {
+          this.statusIndicator.className = 'status-indicator transitioning';
+          this.statusText.textContent = data.pendingAction === 'disconnect' ? 'Disconnecting...' : 'Reconnecting...';
+        } else if (data.state === 'connected') {
+          this.statusIndicator.className = 'status-indicator connected';
+          this.statusText.textContent = 'Connected';
+        } else if (data.state === 'disconnected') {
+          this.statusIndicator.className = 'status-indicator disconnected';
+          this.statusText.textContent = 'Disconnected';
+        } else {
+          this.statusIndicator.className = 'status-indicator unknown';
+          this.statusText.textContent = 'Unknown';
+        }
+      }
+      
+      updateToggleControl(data) {
+        if (!this.toggle || !this.toggleLabel) return;
+        
+        // Update toggle enabled/disabled state
+        this.toggle.disabled = !data.controlEnabled;
+        
+        // Update toggle checked state and label based on current state
+        if (data.state === 'connected') {
+          this.toggle.checked = true;
+          this.toggleLabel.textContent = 'Connected';
+        } else if (data.state === 'disconnected') {
           this.toggle.checked = false;
-          this.statusText.textContent = 'Container Stopped';
-          this.statusText.className = 'status-text stopped';
-          this.userInitiatedTransition = false;
-          this.hideWaitingDetails();
-          return;
+          this.toggleLabel.textContent = 'Disconnected';
         }
         
-        // Handle error state
-        if (data.state === 'ERROR' || data.state === 'UNREACHABLE') {
-          this.toggle.disabled = true;
-          this.statusText.textContent = 'Error';
-          this.statusText.className = 'status-text error';
-          this.showError(data.message || 'Cannot reach Relay Proxy');
-          this.userInitiatedTransition = false;
+        // If user initiated a transition, show waiting details
+        if (this.userInitiatedTransition && data.pendingAction) {
+          this.updateWaitingDetails(data, data.pendingAction === 'disconnect');
+        } else {
           this.hideWaitingDetails();
-          return;
-        }
-        
-        // Update based on actual connection state
-        switch (data.state) {
-          case 'VALID':
-            // Calculate elapsed time if we were transitioning
-            if (this.userInitiatedTransition && this.transitionStartTime) {
-              const elapsedMs = Date.now() - this.transitionStartTime;
-              const elapsedSec = (elapsedMs / 1000).toFixed(2);
-              console.log(`[Reconnect Complete] Relay Proxy reconnected after ${elapsedSec} seconds`);
-            }
-            // Fully connected - enable toggle
-            this.hideWaitingDetails();
-            this.toggle.disabled = false;
-            this.toggle.checked = true;
-            this.statusText.textContent = 'Connected';
-            this.statusText.className = 'status-text connected';
-            if (data.readyToTest) {
-              this.statusText.title = 'Ready to test connected behavior';
-            }
-            this.userInitiatedTransition = false;
-            break;
-            
-          case 'INTERRUPTED':
-          case 'OFF':
-            // Calculate elapsed time if we were transitioning
-            if (this.userInitiatedTransition && this.transitionStartTime) {
-              const elapsedMs = Date.now() - this.transitionStartTime;
-              const elapsedSec = (elapsedMs / 1000).toFixed(2);
-              console.log(`[Disconnect Complete] Relay Proxy disconnected after ${elapsedSec} seconds`);
-            }
-            // Fully disconnected - enable toggle
-            this.hideWaitingDetails();
-            this.toggle.disabled = false;
-            this.toggle.checked = false;
-            this.statusText.textContent = 'Disconnected';
-            this.statusText.className = 'status-text disconnected';
-            if (data.readyToTest) {
-              this.statusText.title = 'Ready to test disconnected behavior';
-            }
-            this.userInitiatedTransition = false;
-            break;
-            
-          case 'DISCONNECTING':
-            // Transitioning to disconnected - iptables rules applied but relay hasn't detected yet
-            this.toggle.disabled = true;
-            this.toggle.checked = false;
-            this.statusText.textContent = 'Disconnecting...';
-            this.statusText.className = 'status-text transitioning';
-            this.statusText.title = data.stateReason || 'Network blocked - waiting for relay to detect disconnection (5-7 minutes)';
-            console.log(`[Connection State] 🔄 DISCONNECTING - ${data.stateReason || 'Waiting for relay to detect'}`);
-            this.updateWaitingDetails(data, true);
-            break;
-            
-          case 'INITIALIZING':
-            // Starting up - disable toggle during initialization
-            this.toggle.disabled = true;
-            this.toggle.checked = false;
-            this.statusText.textContent = 'Initializing...';
-            this.statusText.className = 'status-text transitioning';
-            this.statusText.title = 'Relay Proxy is starting up';
-            break;
-            
-          default:
-            // Unknown or transitioning state - disable toggle
-            this.toggle.disabled = true;
-            this.statusText.textContent = 'Transitioning...';
-            this.statusText.className = 'status-text transitioning';
-            this.statusText.title = data.message || 'Connection state is changing - please wait';
-            console.log(`[Connection State] 🔄 TRANSITIONING - ${data.message || 'State is changing'}`);
-            break;
         }
       }
       
@@ -1682,7 +1729,7 @@
       
       // Start SSE connection (for Redis monitor)
       startSSE() {
-        this.eventSource = new EventSource(`http://localhost:4000/api/redis/monitor`);
+        this.eventSource = new EventSource(`http://localhost:${API_SERVICE_PORT}/api/redis/monitor`);
         this.eventSource.onmessage = (event) => {
           const data = JSON.parse(event.data);
           // Filter out PING commands (data.command for Redis monitor, data.message for others)
@@ -1710,7 +1757,7 @@
       startPolling() {
         const poll = async () => {
           try {
-            const response = await fetch(`http://localhost:4000/api/logs/${this.containerId}`);
+            const response = await fetch(`http://localhost:${API_SERVICE_PORT}/api/logs/${this.containerId}`);
             const data = await response.json();
             if (data.lines && Array.isArray(data.lines)) {
               this.setLines(data.lines);
@@ -1774,7 +1821,7 @@
         // (only for Docker log consoles, not for Redis monitor which uses SSE)
         if (this.updateMethod === 'polling') {
           try {
-            const response = await fetch(`http://localhost:4000/api/logs/${this.containerId}/clear`, {
+            const response = await fetch(`http://localhost:${API_SERVICE_PORT}/api/logs/${this.containerId}/clear`, {
               method: 'POST'
             });
             
@@ -2030,14 +2077,10 @@
           url += `&location=${encodeURIComponent(location)}`;
         }
         
-        console.log(`[${this.serviceId}] Connecting to SSE stream: ${url}`);
         this.eventSource = new EventSource(url);
         
         this.eventSource.onmessage = (event) => {
-          console.log(`[${this.serviceId}] SSE message received:`, event.data);
           const data = JSON.parse(event.data);
-          console.log(`[${this.serviceId}] Parsed message:`, data.message);
-          console.log(`[${this.serviceId}] Hash info:`, data.hashInfo);
           this.updateFlagValue(data.message);
           
           // Update hash info if available
@@ -2065,7 +2108,6 @@
         };
         
         this.eventSource.onopen = () => {
-          console.log(`SSE connection opened for ${this.serviceId}`);
           this.updateStatusIndicator(true);
           // Reset reconnect attempts on successful connection
           this.reconnectAttempts = 0;
@@ -2123,9 +2165,7 @@
       
       // Update the displayed hash information
       updateHashInfo(hashInfo) {
-        console.log(`[${this.serviceId}] updateHashInfo called with:`, hashInfo);
         const hashElement = document.getElementById(`${this.serviceId}-hash-info`);
-        console.log(`[${this.serviceId}] hashElement found:`, !!hashElement);
         if (hashElement && hashInfo) {
           // Extract context key from either single or multi-context
           let contextKey;
@@ -2142,9 +2182,6 @@
           html += `<div><strong>Bucket Value:</strong> <span style="color: #4caf50; font-weight: 600;">${hashInfo.bucketValue.toFixed(5)}</span></div>`;
           html += `<div style="margin-top: 6px; font-size: 11px; color: #666; font-style: italic;">Bucket determines which variation the user receives in percentage rollouts</div>`;
           hashElement.innerHTML = html;
-          console.log(`[${this.serviceId}] Hash info updated successfully`);
-        } else {
-          console.log(`[${this.serviceId}] Hash info NOT updated - hashElement: ${!!hashElement}, hashInfo: ${!!hashInfo}`);
         }
       }
       
@@ -2317,7 +2354,7 @@
       // Poll service status
       async pollStatus() {
         try {
-          const response = await fetch(`http://localhost:4000/api/${this.serviceId}/status`);
+          const response = await fetch(`http://localhost:${API_SERVICE_PORT}/api/${this.serviceId}/status`);
           const data = await response.json();
           
           // Update status indicator based on health
@@ -2391,7 +2428,7 @@
       // Fetch PHP cache from Redis via API
       async fetchPHPCache() {
         try {
-          const response = await fetch('http://localhost:4000/api/php/redis-cache', {
+          const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/php/redis-cache', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
           });
@@ -2401,10 +2438,20 @@
             if (data.success && data.flags) {
               console.log('[PHP] Cache fetched successfully:', Object.keys(data.flags).length, 'flags');
               window.renderPHPSDKCache(data.flags);
+            } else {
+              // Redis is down or error occurred - clear the display
+              console.log('[PHP] Redis unavailable, clearing cache display');
+              window.renderPHPSDKCache({});
             }
+          } else {
+            // HTTP error - clear the display
+            console.log('[PHP] HTTP error fetching cache, clearing display');
+            window.renderPHPSDKCache({});
           }
         } catch (error) {
           console.error('[PHP] Error fetching cache:', error);
+          // Network error - clear the display
+          window.renderPHPSDKCache({});
         }
       }
       
@@ -2419,7 +2466,6 @@
             const contextChanged = JSON.stringify(this.currentContext) !== JSON.stringify(context);
             this.currentContext = context;
             this.updateContextDisplay();
-            console.log(`[${this.serviceId}] Current context loaded:`, context);
             
             // If context changed and SSE is already connected, reconnect to use new context
             if (contextChanged && this.eventSource) {
@@ -2510,8 +2556,6 @@
               html += '<div style="font-family: monospace;">';
               flagKeys.forEach(key => {
                 const flagValue = flags[key];
-                
-                console.log('[Dashboard] Processing flag:', key, 'has variations:', !!flagValue.variations, 'length:', flagValue.variations?.length);
                 
                 // Check if this is a complex configuration object or a simple value
                 const isComplexConfig = flagValue && typeof flagValue === 'object' && flagValue.version !== undefined;
@@ -2680,7 +2724,7 @@
     // Requirements: 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8
     async function fetchPanelConfiguration() {
       try {
-        const response = await fetch('http://localhost:4000/api/flag/dashboard-service-panel-1');
+        const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/flag/dashboard-service-panel-1');
         const data = await response.json();
         // Flag now returns string values: "nodejs", "python", or "javascript"
         const flagValue = data.value;
@@ -2769,7 +2813,7 @@
       
       try {
         // Call the hash calculation API endpoint
-        const response = await fetch('http://localhost:3000/api/calculate-hash', {
+        const response = await fetch('http://localhost:${NODE_SERVICE_PORT}/api/calculate-hash', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -2814,7 +2858,6 @@
       
       if (!consoleElement) {
         // Console elements are in the separate terminal window, not in main dashboard
-        console.log('[Dashboard] Terminal consoles are in separate window, skipping panel update');
         return;
       }
       
@@ -3076,7 +3119,7 @@
         pythonStartButton.addEventListener('click', async () => {
           try {
             pythonStartButton.disabled = true;
-            const response = await fetch('http://localhost:4000/api/python/start', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/python/start', {
               method: 'POST'
             });
             const data = await response.json();
@@ -3096,7 +3139,7 @@
         pythonStopButton.addEventListener('click', async () => {
           try {
             pythonStopButton.disabled = true;
-            const response = await fetch('http://localhost:4000/api/python/stop', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/python/stop', {
               method: 'POST'
             });
             const data = await response.json();
@@ -3116,7 +3159,7 @@
         pythonRestartButton.addEventListener('click', async () => {
           try {
             pythonRestartButton.disabled = true;
-            const response = await fetch('http://localhost:4000/api/python/restart', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/python/restart', {
               method: 'POST'
             });
             const data = await response.json();
@@ -3152,7 +3195,7 @@
         reactStartButton.addEventListener('click', async () => {
           try {
             reactStartButton.disabled = true;
-            const response = await fetch('http://localhost:4000/api/container/react-app-dev/start', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/container/react-app-dev/start', {
               method: 'POST'
             });
             const data = await response.json();
@@ -3172,7 +3215,7 @@
         reactStopButton.addEventListener('click', async () => {
           try {
             reactStopButton.disabled = true;
-            const response = await fetch('http://localhost:4000/api/container/react-app-dev/stop', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/container/react-app-dev/stop', {
               method: 'POST'
             });
             const data = await response.json();
@@ -3192,7 +3235,7 @@
         reactRestartButton.addEventListener('click', async () => {
           try {
             reactRestartButton.disabled = true;
-            const response = await fetch('http://localhost:4000/api/container/react-app-dev/restart', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/container/react-app-dev/restart', {
               method: 'POST'
             });
             const data = await response.json();
@@ -3254,7 +3297,7 @@
     async function fetchPythonStatus() {
       try {
         // Check container status
-        const containerResponse = await fetch('http://localhost:4000/api/python/container-status');
+        const containerResponse = await fetch('http://localhost:${API_SERVICE_PORT}/api/python/container-status');
         const startButton = document.getElementById('python-start-button');
         const stopButton = document.getElementById('python-stop-button');
         const restartButton = document.getElementById('python-restart-button');
@@ -3280,7 +3323,7 @@
           }
         } else {
           // Fallback to SDK status check
-          const response = await fetch('http://localhost:4000/api/python/status');
+          const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/python/status');
           const data = await response.json();
           
           if (data.connected) {
@@ -3312,7 +3355,7 @@
     async function fetchPythonFlagValue() {
       try {
         // Don't pass contextKey - let the server use current_context
-        const response = await fetch('http://localhost:4000/api/python/flag');
+        const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/python/flag');
         const data = await response.json();
         
         const flagValueElement = document.getElementById('python-flag-value');
@@ -3357,8 +3400,7 @@
       cacheElement.innerHTML = '<div style="color: #999; font-style: italic;">Loading SDK data...</div>';
       
       try {
-        console.log('[fetchPythonSDKData] Fetching from http://localhost:4000/api/python/sdk-data-store');
-        const response = await fetch('http://localhost:4000/api/python/sdk-data-store', {
+        const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/python/sdk-data-store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({})
@@ -3369,13 +3411,10 @@
         }
         
         const data = await response.json();
-        console.log('[fetchPythonSDKData] Received data:', data);
         
         if (data.flags) {
           const flags = data.flags;
           const flagKeys = Object.keys(flags);
-          
-          console.log('[fetchPythonSDKData] Processing', flagKeys.length, 'flags');
           
           let html = '';
           
@@ -3387,7 +3426,6 @@
           } else {
             flagKeys.forEach(key => {
               const flagValue = flags[key];
-              console.log('[fetchPythonSDKData] Processing flag:', key, 'has variations:', !!flagValue.variations, 'length:', flagValue.variations?.length);
               
               // Check if this is a complex configuration object or a simple value
               const isComplexConfig = flagValue && typeof flagValue === 'object' && flagValue.version !== undefined;
@@ -3477,9 +3515,7 @@
             });
           }
           
-          console.log('[fetchPythonSDKData] Setting innerHTML, length:', html.length);
           cacheElement.innerHTML = html;
-          console.log('[fetchPythonSDKData] Render complete');
         } else {
           console.warn('[fetchPythonSDKData] No flags property in response');
           cacheElement.innerHTML = '<div style="color: #999; font-style: italic;">No flag data available</div>';
@@ -3514,7 +3550,6 @@
     
     document.addEventListener('DOMContentLoaded', async () => {
       // Initialize LaunchDarkly JavaScript SDK FIRST before rendering anything
-      console.log('[Dashboard] Initializing LaunchDarkly JavaScript SDK...');
       
       // Get client-side ID from meta tag (injected by server)
       const clientSideId = document.querySelector('meta[name="ld-client-id"]')?.content;
@@ -3530,14 +3565,12 @@
         try {
           // Initialize the SDK - connects through Relay Proxy for streaming updates
           // Using a static "container" context for the dashboard
-          console.log('[Dashboard] Initializing LaunchDarkly JavaScript SDK...');
           const ldClient = window.LDClient.initialize(clientSideId, {
             kind: 'container',
             key: 'dashboard-v2'
           }, {
-            baseUrl: 'http://localhost:8030',      // Connect to Relay Proxy
-            streamUrl: 'http://localhost:8030',    // Stream from Relay Proxy
-            eventsUrl: 'http://localhost:8030',    // Events to Relay Proxy
+            // Direct connection to LaunchDarkly (not through relay proxy)
+            // This allows the dashboard to continue working when relay proxy is down
             streaming: true,             // Enable streaming for real-time updates
             sendEvents: false,           // Disable analytics events
             allAttributesPrivate: true,  // Privacy setting
@@ -3547,24 +3580,21 @@
           
           // Wait for SDK to be ready (5 second timeout as recommended by LaunchDarkly)
           await ldClient.waitForInitialization(5);
-          console.log('[Dashboard] LaunchDarkly JavaScript SDK initialized');
           
           // Instantiate TerminalWindowManager after SDK initialization
           const terminalWindowManager = new TerminalWindowManager();
-          console.log('[Dashboard] TerminalWindowManager instantiated');
           
           // Add streaming connection verification
           ldClient.on('ready', () => {
-            console.log('[Dashboard] SDK ready event fired');
+            // SDK ready
           });
           
           ldClient.on('change', () => {
-            console.log('[Dashboard] SDK detected a flag change (generic listener)');
+            // SDK detected a flag change
           });
           
           // Initialize SECOND JavaScript SDK instance for JavaScript Client panel
           // This instance uses proxy mode and a separate anonymous context
-          console.log('[Dashboard] Initializing JavaScript Client SDK instance...');
           const randomId = Math.random().toString(36).substring(7);
           window.jsClientSDK = window.LDClient.initialize(clientSideId, {
             kind: 'user',
@@ -3581,7 +3611,6 @@
           });
           
           await window.jsClientSDK.waitForInitialization(5);
-          console.log('[Dashboard] JavaScript Client SDK instance initialized');
           
           // SDK is now ready - set status to connected and update panel immediately
           updatePillStatus('javascript', 'connected');
@@ -3685,24 +3714,18 @@
           
           // Get initial flag value BEFORE rendering
           showTerminalPanels = ldClient.variation('terminal-panels', false);
-          console.log('[Dashboard] terminal-panels flag value:', showTerminalPanels);
           
           // Use TerminalWindowManager to open window if flag is true
           if (showTerminalPanels) {
-            console.log('[Dashboard] Opening terminal window (initial evaluation)');
             terminalWindowManager.openTerminalWindow();
           }
           
           // Listen for flag changes
           ldClient.on('change:terminal-panels', (newValue) => {
-            console.log('[Dashboard] terminal-panels flag changed to:', newValue);
-            
             // Use TerminalWindowManager to open or close window based on flag value
             if (newValue) {
-              console.log('[Dashboard] Opening terminal window (flag changed to true)');
               terminalWindowManager.openTerminalWindow();
             } else {
-              console.log('[Dashboard] Closing terminal window (flag changed to false)');
               terminalWindowManager.closeTerminalWindow();
             }
           });
@@ -3714,9 +3737,6 @@
           // - "javascript" = show JavaScript Client panel
           // Requirements: 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8
           ldClient.on('change:dashboard-service-panel-1', (flagValue) => {
-            console.log('[Dashboard] ===== FLAG CHANGE DETECTED =====');
-            console.log('[Dashboard] dashboard-service-panel-1 changed to:', flagValue);
-            
             // Validate flag value and fallback to python if invalid
             let newService = flagValue;
             if (newService !== 'nodejs' && newService !== 'python' && newService !== 'javascript') {
@@ -3727,11 +3747,8 @@
             const oldService = window.currentPanelService;
             
             if (newService === oldService) {
-              console.log('[Dashboard] Panel service unchanged, no action needed');
               return;
             }
-            
-            console.log(`[Dashboard] Switching Panel 1 from ${oldService} to ${newService}`);
             
             // Update the global service tracker
             window.currentPanelService = newService;
@@ -3753,32 +3770,26 @@
             
             // Show the selected panel
             if (newService === 'nodejs') {
-              console.log('[Dashboard] Showing Node.js panel');
               nodePanelEl.classList.add('active');
               
               // Disconnect Python SSE stream to save resources
               if (pythonPanel && pythonPanel.eventSource) {
-                console.log('[Dashboard] Disconnecting Python SSE stream');
                 pythonPanel.eventSource.close();
                 pythonPanel.eventSource = null;
               }
             } else if (newService === 'javascript') {
-              console.log('[Dashboard] Showing JavaScript Client panel');
               javascriptPanelEl.classList.add('active');
               
               // Disconnect Python SSE stream to save resources
               if (pythonPanel && pythonPanel.eventSource) {
-                console.log('[Dashboard] Disconnecting Python SSE stream');
                 pythonPanel.eventSource.close();
                 pythonPanel.eventSource = null;
               }
             } else {
-              console.log('[Dashboard] Showing Python panel');
               pythonPanelEl.classList.add('active');
               
               // Connect Python SSE stream if not already connected
               if (pythonPanel && !pythonPanel.eventSource) {
-                console.log('[Dashboard] Connecting Python SSE stream');
                 setTimeout(() => {
                   pythonPanel.connectStream();
                 }, 200);
@@ -3787,31 +3798,23 @@
             
             // Update terminal panel labels
             updateTerminalPanel1(newService);
-            
-            console.log('[Dashboard] ===== FLAG CHANGE COMPLETE =====');
           });
           
         } catch (error) {
           console.error('[Dashboard] Failed to initialize LaunchDarkly SDK:', error);
-          console.log('[Dashboard] Defaulting to flag=false (no terminal window will open)');
           
           // Default to false when SDK fails to initialize
           showTerminalPanels = false;
           
           // Still instantiate TerminalWindowManager for potential manual use
           const terminalWindowManager = new TerminalWindowManager();
-          console.log('[Dashboard] TerminalWindowManager instantiated (SDK initialization failed)');
         }
       }
       
       // NOW create service panel instances
-      console.log('[Dashboard] Creating service panels...');
-      nodePanel = new ServicePanel('node', 'http://localhost:3000/api/node');
-      console.log('[Dashboard] Node panel created');
-      phpPanel = new ServicePanel('php', 'http://localhost:4000/api/php');
-      console.log('[Dashboard] PHP panel created');
-      pythonPanel = new ServicePanel('python', 'http://localhost:4000/api/python');
-      console.log('[Dashboard] Python panel created');
+      nodePanel = new ServicePanel('node', 'http://localhost:${NODE_SERVICE_PORT}/api/node');
+      phpPanel = new ServicePanel('php', 'http://localhost:${API_SERVICE_PORT}/api/php');
+      pythonPanel = new ServicePanel('python', 'http://localhost:${API_SERVICE_PORT}/api/python');
       
       // Create JavaScript Client panel object (lightweight - uses SDK directly)
       javascriptClientPanel = {
@@ -3935,15 +3938,11 @@
         }
       };
       
-      console.log('[Dashboard] JavaScript Client panel object created');
-      
       // Initialize with current SDK context
       javascriptClientPanel.initialize();
       
       // Fetch panel configuration and initialize Panel 1 dynamically
-      console.log('[Dashboard] Fetching panel configuration...');
       const panelService = await fetchPanelConfiguration();
-      console.log('[Dashboard] Panel 1 will display:', panelService);
       
       // Store panel service for later use (terminal panel initialization)
       window.currentPanelService = panelService;
@@ -3960,15 +3959,12 @@
       
       // Show the selected panel based on flag value
       if (panelService === 'javascript') {
-        console.log('[Dashboard] Initializing JavaScript Client in Panel 1');
         if (javascriptPanelEl) javascriptPanelEl.classList.add('active');
         updateTerminalPanel1('javascript');
       } else if (panelService === 'python') {
-        console.log('[Dashboard] Initializing Python service in Panel 1');
         if (pythonPanelEl) pythonPanelEl.classList.add('active');
         updateTerminalPanel1('python');
       } else {
-        console.log('[Dashboard] Initializing Node.js service in Panel 1');
         if (nodePanelEl) nodePanelEl.classList.add('active');
         updateTerminalPanel1('nodejs');
       }
@@ -3978,7 +3974,7 @@
       // Update relay proxy status by fetching via backend proxy (CORS workaround)
       async function updateRelayProxyStatus() {
         try {
-          const response = await fetch('http://localhost:4000/api/relay-status');
+          const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/relay-status');
           
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -4096,7 +4092,7 @@
         dataStoreElement.innerHTML = '<div style="color: #999; font-style: italic;">Loading...</div>';
         
         try {
-          const response = await fetch('http://localhost:4000/api/redis/data-store', {
+          const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/redis/data-store', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
           });
@@ -4249,7 +4245,6 @@
       
       // Render Relay Proxy cache display from flag data
       function renderRelayProxyCache(flags) {
-        console.log('[renderRelayProxyCache] Called with', Object.keys(flags).length, 'flags');
         const cacheElement = document.getElementById('relay-proxy-cache');
         
         if (!cacheElement) {
@@ -4386,7 +4381,6 @@
         }
         
         cacheElement.innerHTML = html;
-        console.log('[renderRelayProxyCache] Render complete');
       }
       
       // Render Node SDK cache (reuses same logic as Relay Proxy)
@@ -4413,14 +4407,11 @@
       
       // Render Redis data store (reuses same logic as Relay Proxy)
       function renderRedisDataStore(flags) {
-        console.log('[renderRedisDataStore] Called with', Object.keys(flags).length, 'flags');
         const dataStoreElement = document.getElementById('redis-data-store');
         if (!dataStoreElement) {
           console.error('[renderRedisDataStore] Element not found!');
           return;
         }
-        
-        console.log('[renderRedisDataStore] Element found, current innerHTML length:', dataStoreElement.innerHTML.length);
         
         const flagKeys = Object.keys(flags);
         let html = '';
@@ -4434,10 +4425,7 @@
           html += renderFlagList(flags);
         }
         
-        console.log('[renderRedisDataStore] About to set innerHTML, new HTML length:', html.length);
         dataStoreElement.innerHTML = html;
-        console.log('[renderRedisDataStore] innerHTML set, new length:', dataStoreElement.innerHTML.length);
-        console.log('[renderRedisDataStore] Render complete');
       }
       
       // Make renderRedisDataStore globally accessible for pollRedisStatus()
@@ -4445,14 +4433,11 @@
       
       // Render PHP SDK cache (reuses same logic as Relay Proxy)
       function renderPHPSDKCache(flags) {
-        console.log('[renderPHPSDKCache] Called with', Object.keys(flags).length, 'flags');
         const cacheElement = document.getElementById('php-sdk-cache');
         if (!cacheElement) {
           console.error('[renderPHPSDKCache] Element not found!');
           return;
         }
-        
-        console.log('[renderPHPSDKCache] Element found, current innerHTML length:', cacheElement.innerHTML.length);
         
         const flagKeys = Object.keys(flags);
         let html = '';
@@ -4466,10 +4451,7 @@
           html += renderFlagList(flags);
         }
         
-        console.log('[renderPHPSDKCache] About to set innerHTML, new HTML length:', html.length);
         cacheElement.innerHTML = html;
-        console.log('[renderPHPSDKCache] innerHTML set, new length:', cacheElement.innerHTML.length);
-        console.log('[renderPHPSDKCache] Render complete');
       }
       
       // Make renderPHPSDKCache globally accessible for ServicePanel.fetchPHPCache()
@@ -4621,7 +4603,7 @@
         cacheElement.innerHTML = '<div style="color: #999; font-style: italic;">Connecting...</div>';
         
         try {
-          relayProxyCacheEventSource = new EventSource('http://localhost:4000/api/relay-proxy/cache/stream');
+          relayProxyCacheEventSource = new EventSource('http://localhost:${API_SERVICE_PORT}/api/relay-proxy/cache/stream');
           
           relayProxyCacheEventSource.onmessage = (event) => {
             try {
@@ -4633,16 +4615,20 @@
               }
               
               if (data.flags) {
-                console.log('[Relay Proxy Cache] Received update:', Object.keys(data.flags).length, 'flags');
                 renderRelayProxyCache(data.flags);
                 
                 // Also update Redis display since Redis is updated by Relay Proxy
-                console.log('[Relay Proxy Cache] Also updating Redis display');
-                renderRedisDataStore(data.flags);
+                // Only update if Redis is actually connected
+                if (isRedisAvailable()) {
+                  renderRedisDataStore(data.flags);
+                } else {
+                  // Redis is down - clear the display
+                  console.log('[Relay Proxy Cache] Redis unavailable, clearing Redis display');
+                  renderRedisDataStore({});
+                }
                 
-                // Also update PHP display since PHP reads from Redis
-                console.log('[Relay Proxy Cache] Also updating PHP SDK cache display');
-                renderPHPSDKCache(data.flags);
+                // Note: PHP display is NOT updated here - it has its own polling
+                // via ServicePanel.fetchPHPCache() which checks Redis availability
               }
             } catch (error) {
               console.error('Error parsing Relay Proxy cache update:', error);
@@ -4661,7 +4647,6 @@
             }, 5000);
           };
           
-          console.log('[Relay Proxy Cache] SSE stream connected');
         } catch (error) {
           console.error('Error connecting to Relay Proxy cache stream:', error);
           cacheElement.innerHTML = `<div style="color: #f44336;">Error: ${error.message}</div>`;
@@ -4685,7 +4670,7 @@
         cacheElement.innerHTML = '<div style="color: #999; font-style: italic;">Connecting...</div>';
         
         try {
-          nodeSdkCacheEventSource = new EventSource('http://localhost:3000/api/node/sdk-cache/stream');
+          nodeSdkCacheEventSource = new EventSource('http://localhost:${NODE_SERVICE_PORT}/api/node/sdk-cache/stream');
           
           nodeSdkCacheEventSource.onmessage = (event) => {
             try {
@@ -4726,10 +4711,16 @@
       
       // Track Redis connection state for detecting transitions
       let wasRedisConnected = false;
+      let currentRedisStatus = { connected: false, running: false };
+      
+      // Helper function to check if Redis is currently available
+      function isRedisAvailable() {
+        return currentRedisStatus.connected && currentRedisStatus.running;
+      }
       
       async function pollRedisStatus() {
         try {
-          const response = await fetch('http://localhost:4000/api/redis/status');
+          const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/redis/status');
           const statusIndicator = document.getElementById('redis-status');
           const statusText = document.getElementById('redis-status-text');
           const startButton = document.getElementById('redis-start-button');
@@ -4739,6 +4730,9 @@
           if (response.ok) {
             const data = await response.json();
             const isConnected = data.connected && data.running;
+            
+            // Update current status
+            currentRedisStatus = { connected: data.connected, running: data.running };
             
             if (isConnected) {
               // Redis is running
@@ -4760,10 +4754,9 @@
                                     dataStoreElement.innerHTML.includes('font-style: italic')));
               
               if (shouldFetch) {
-                console.log('[Redis] Fetching data store (wasRedisConnected:', wasRedisConnected, ')');
                 // Fetch from PHP redis-cache endpoint (which reads from Redis)
                 try {
-                  const cacheResponse = await fetch('http://localhost:4000/api/php/redis-cache', {
+                  const cacheResponse = await fetch('http://localhost:${API_SERVICE_PORT}/api/php/redis-cache', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({})
@@ -4771,7 +4764,6 @@
                   if (cacheResponse.ok) {
                     const cacheData = await cacheResponse.json();
                     if (cacheData.flags) {
-                      console.log('[Redis] Data store fetched successfully:', Object.keys(cacheData.flags).length, 'flags');
                       window.renderRedisDataStore(cacheData.flags);
                     }
                   }
@@ -4893,7 +4885,7 @@
           redisStartButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/redis/start', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/redis/start', {
               method: 'POST'
             });
             const data = await response.json();
@@ -4921,7 +4913,7 @@
           redisStopButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/redis/stop', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/redis/stop', {
               method: 'POST'
             });
             const data = await response.json();
@@ -4949,7 +4941,7 @@
           redisRestartButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/redis/restart', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/redis/restart', {
               method: 'POST'
             });
             const data = await response.json();
@@ -4982,7 +4974,7 @@
           relayProxyStartButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/relay-proxy/start', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/relay-proxy/start', {
               method: 'POST'
             });
             const data = await response.json();
@@ -5010,7 +5002,7 @@
           relayProxyStopButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/relay-proxy/stop', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/relay-proxy/stop', {
               method: 'POST'
             });
             const data = await response.json();
@@ -5038,7 +5030,7 @@
           relayProxyRestartButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/relay-proxy/restart', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/relay-proxy/restart', {
               method: 'POST'
             });
             const data = await response.json();
@@ -5062,7 +5054,7 @@
       // Node.js container status polling
       async function pollNodeContainerStatus() {
         try {
-          const response = await fetch('http://localhost:4000/api/node/container-status');
+          const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/node/container-status');
           const statusIndicator = document.getElementById('node-status');
           const startButton = document.getElementById('node-start-button');
           const stopButton = document.getElementById('node-stop-button');
@@ -5176,7 +5168,7 @@
           nodeStartButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/node/start', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/node/start', {
               method: 'POST'
             });
             const data = await response.json();
@@ -5204,7 +5196,7 @@
           nodeStopButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/node/stop', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/node/stop', {
               method: 'POST'
             });
             const data = await response.json();
@@ -5232,7 +5224,7 @@
           nodeRestartButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/node/restart', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/node/restart', {
               method: 'POST'
             });
             const data = await response.json();
@@ -5256,7 +5248,7 @@
       // PHP container status polling
       async function pollPhpContainerStatus() {
         try {
-          const response = await fetch('http://localhost:4000/api/php/container-status');
+          const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/php/container-status');
           const statusIndicator = document.getElementById('php-status');
           const startButton = document.getElementById('php-start-button');
           const stopButton = document.getElementById('php-stop-button');
@@ -5265,8 +5257,18 @@
           if (response.ok) {
             const data = await response.json();
             if (data.connected && data.running) {
-              // PHP container is running
-              updatePillStatus('php', 'connected');
+              // Check if degraded (Redis down but PHP still running with fallback)
+              if (data.status === 'degraded') {
+                updatePillStatus('php', 'degraded');
+              } else {
+                // PHP container is running and healthy
+                updatePillStatus('php', 'connected');
+              }
+              
+              // Fetch PHP cache when container is running
+              if (phpPanel && phpPanel.fetchPHPCache) {
+                phpPanel.fetchPHPCache();
+              }
               
               // Show stop and restart buttons, hide start
               if (startButton) startButton.style.display = 'none';
@@ -5355,7 +5357,7 @@
       // Python container status polling
       async function pollPythonContainerStatus() {
         try {
-          const response = await fetch('http://localhost:4000/api/python/container-status');
+          const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/python/container-status');
           const statusIndicator = document.getElementById('python-status');
           const startButton = document.getElementById('python-start-button');
           const stopButton = document.getElementById('python-stop-button');
@@ -5468,7 +5470,7 @@
           phpStartButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/php/start', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/php/start', {
               method: 'POST'
             });
             const data = await response.json();
@@ -5496,7 +5498,7 @@
           phpStopButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/php/stop', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/php/stop', {
               method: 'POST'
             });
             const data = await response.json();
@@ -5524,7 +5526,7 @@
           phpRestartButton.textContent = '...';
           
           try {
-            const response = await fetch('http://localhost:4000/api/php/restart', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/php/restart', {
               method: 'POST'
             });
             const data = await response.json();
@@ -5553,54 +5555,43 @@
       fetchReactStatus();
       
       // Fetch contexts FIRST to establish sessions
-      console.log('[Dashboard] Fetching initial contexts...');
       await nodePanel.fetchCurrentContext();
       await phpPanel.fetchCurrentContext();
-      console.log('[Dashboard] Initial contexts fetched');
-      console.log('[Dashboard] Node context:', nodePanel.currentContext);
-      console.log('[Dashboard] PHP context:', phpPanel.currentContext);
       
       // Wait a moment for SDKs to fully initialize (3 seconds to be safe)
-      console.log('[Dashboard] Waiting 3 seconds for SDKs to initialize...');
       await new Promise(resolve => setTimeout(resolve, 3000));
-      console.log('[Dashboard] SDKs should be initialized');
       
       // NOW connect to SSE streams (they will use the established sessions and initialized SDKs)
-      console.log('[Dashboard] Connecting SSE streams...');
       
       // Connect Node.js stream
       nodePanel.connectStream();
-      console.log('[Dashboard] Node stream connected');
       
       // Add small delay before connecting PHP stream to avoid race conditions
       setTimeout(() => {
         phpPanel.connectStream();
-        console.log('[Dashboard] PHP stream connected');
       }, 100);
       
       // Connect Python stream if it's the active panel
       if (window.currentPanelService === 'python') {
         setTimeout(() => {
           pythonPanel.connectStream();
-          console.log('[Dashboard] Python stream connected');
         }, 200);
       }
       
       // JavaScript Client panel doesn't need SSE stream - uses SDK directly in browser
       if (window.currentPanelService === 'javascript') {
-        console.log('[Dashboard] JavaScript Client panel active - no SSE stream needed');
+        // No SSE stream needed
       }
       
       // Start status polling (but skip initial context fetch since we already did it)
       nodePanel.startStatusPolling();
-      phpPanel.startStatusPolling();
+      // PHP uses pollPhpContainerStatus() instead of ServicePanel polling
+      // phpPanel.startStatusPolling(); // DISABLED - using container status polling instead
       pythonPanel.startStatusPolling();
       // JavaScript Client panel doesn't need status polling - runs in browser
       
       // Initialize relay proxy connection control
-      console.log('[Dashboard] Initializing relay proxy connection control...');
       const relayProxyConnectionControl = new RelayProxyConnectionControl();
-      console.log('[Dashboard] Relay proxy connection control initialized');
       
       // Set up context button handlers
       const nodeContextButton = document.getElementById('node-context-button');
@@ -5626,10 +5617,8 @@
       
       // JavaScript Client context button handler
       const javascriptContextButton = document.getElementById('javascript-context-button');
-      console.log('[Dashboard] JavaScript context button found:', !!javascriptContextButton);
       if (javascriptContextButton) {
         javascriptContextButton.addEventListener('click', () => {
-          console.log('[Dashboard] JavaScript context button clicked');
           if (javascriptClientPanel) {
             javascriptClientPanel.openContextEditor();
           } else {
@@ -5640,10 +5629,8 @@
       
       // JavaScript Client test evaluation button handler
       const javascriptTestButton = document.getElementById('javascript-test-evaluation');
-      console.log('[Dashboard] JavaScript test button found:', !!javascriptTestButton);
       if (javascriptTestButton) {
         javascriptTestButton.addEventListener('click', async () => {
-          console.log('[Dashboard] JavaScript test button clicked');
           if (!window.jsClientSDK) {
             alert('JavaScript Client SDK not initialized');
             return;
@@ -5678,7 +5665,7 @@
             // Fetch hash info
             let hashDetails = '';
             try {
-              const hashResponse = await fetch('http://localhost:3000/api/calculate-hash', {
+              const hashResponse = await fetch('http://localhost:${NODE_SERVICE_PORT}/api/calculate-hash', {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json'
@@ -5714,10 +5701,8 @@
       const javascriptHashToggle = document.getElementById('javascript-hash-toggle');
       const javascriptHashContent = document.getElementById('javascript-hash-content');
       const javascriptSdkCache = document.getElementById('javascript-sdk-cache');
-      console.log('[Dashboard] JavaScript hash toggle found:', !!javascriptHashToggle);
       if (javascriptHashToggle && javascriptHashContent) {
         javascriptHashToggle.addEventListener('click', (e) => {
-          console.log('[Dashboard] JavaScript hash toggle clicked');
           e.preventDefault();
           if (javascriptHashContent.style.display === 'none') {
             javascriptHashContent.style.display = 'block';
@@ -5796,7 +5781,7 @@
             console.log('Sending context to PHP test evaluation:', phpPanel.currentContext);
             
             // Send the current context from the panel
-            const response = await fetch('http://localhost:4000/api/php/test-evaluation', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/php/test-evaluation', {
               method: 'POST',
               credentials: 'include',  // Include cookies for session
               headers: {
@@ -5864,7 +5849,7 @@
             console.log('Sending context to test evaluation:', nodePanel.currentContext);
             
             // Send the current context from the panel
-            const response = await fetch('http://localhost:3000/api/node/test-evaluation', {
+            const response = await fetch('http://localhost:${NODE_SERVICE_PORT}/api/node/test-evaluation', {
               method: 'POST',
               credentials: 'include',  // Include cookies for session
               headers: {
@@ -5928,7 +5913,7 @@
           pythonTestButton.textContent = 'Testing...';
           
           try {
-            const response = await fetch('http://localhost:5000/api/flag');
+            const response = await fetch('http://localhost:${PYTHON_SERVICE_PORT}/api/flag');
             const data = await response.json();
             
             // Handle multi-context structure
@@ -6131,7 +6116,7 @@
               statusContent.innerHTML = '<p>Loading status...</p>';
               
               try {
-                const response = await fetch('http://localhost:4000/api/relay-status');
+                const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/relay-status');
                 
                 if (!response.ok) {
                   throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -6392,7 +6377,7 @@
           output.innerHTML = '<p>Starting load test...</p>';
           
           try {
-            const response = await fetch('http://localhost:4000/api/load-test', {
+            const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/load-test', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ requests, concurrency, service })

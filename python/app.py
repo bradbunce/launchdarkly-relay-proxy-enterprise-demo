@@ -26,9 +26,16 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Enable CORS for dashboard access
+# Read port configuration from environment variables
+dashboard_port = os.environ.get('DASHBOARD_PORT', '8000')
+node_port = os.environ.get('NODE_SERVICE_PORT', '3000')
+
 CORS(app, resources={
     r"/api/*": {
-        "origins": ["http://localhost:8000", "http://localhost:3000"],
+        "origins": [
+            f"http://localhost:{dashboard_port}",
+            f"http://localhost:{node_port}"
+        ],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type"]
     }
@@ -931,8 +938,9 @@ def context_endpoint():
     """
     global current_context
     
-    # Get origin from request
-    origin = request.headers.get('Origin', 'http://localhost:8000')
+    # Get origin from request (use dashboard port from environment as fallback)
+    dashboard_port = os.environ.get('DASHBOARD_PORT', '8000')
+    origin = request.headers.get('Origin', f'http://localhost:{dashboard_port}')
     
     # Handle CORS preflight
     if request.method == 'OPTIONS':

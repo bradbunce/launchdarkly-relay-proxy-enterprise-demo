@@ -60,6 +60,27 @@ if (!isset($_SESSION['php_service_context'])) {
     setContextInStore($_SESSION['php_service_context']['key'], $_SESSION['php_service_context']);
 }
 
+// CORS Configuration - Read dashboard port from environment
+$dashboardPort = getenv('DASHBOARD_PORT') ?: '8000';
+$allowedOrigins = [
+    "http://localhost:$dashboardPort",
+    "http://localhost:3000"
+];
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if (in_array($origin, $allowedOrigins)) {
+    header("Access-Control-Allow-Origin: $origin");
+    header("Access-Control-Allow-Credentials: true");
+    header("Access-Control-Allow-Headers: Content-Type");
+    header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+}
+
+// Handle CORS preflight requests
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
 // Log file for streaming to UI
 $logFile = '/tmp/php-app.log';
 

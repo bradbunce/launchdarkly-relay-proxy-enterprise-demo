@@ -3,6 +3,10 @@ let disconnectTimestamp = null;
 let reconnectTimestamp = null;
 let monitoringInterval = null;
 
+// Health status tracking for squid proxy and relay proxy
+let squidProxyHealthy = false;
+let relayProxyHealthy = false;
+
 // Helper function to monitor Relay Proxy connection state changes
 async function monitorRelayProxyConnectionState(action, startTime) {
   const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
@@ -75,6 +79,44 @@ async function monitorRelayProxyConnectionState(action, startTime) {
   });
 }
 
+// Simple timer-based state transition function
+// Instead of polling the status endpoint, we simply wait 60 seconds for the connection
+// to truly change state, then update the state managers
+async function startStateTransitionTimer(action, startTime, operationElapsed) {
+  const targetConnectionState = action === 'disconnect' ? 'disconnected' : 'connected';
+  const transitionTime = 60000; // 60 seconds - the actual time it takes for traffic to stop/start flowing
+  
+  console.log(`[STATE_TRANSITION] Starting ${transitionTime / 1000}s timer for ${action} action`);
+  console.log(`[STATE_TRANSITION] Dashboard will show transitioning state ("${action === 'disconnect' ? 'Disconnecting' : 'Reconnecting'}...") for ${transitionTime / 1000}s`);
+  
+  setTimeout(() => {
+    const totalElapsed = Date.now() - startTime;
+    
+    console.log(`[STATE_TRANSITION] === ${action.toUpperCase()} COMPLETE ===`);
+    console.log(`[STATE_TRANSITION] ${transitionTime / 1000}s transition time elapsed`);
+    console.log(`[STATE_TRANSITION] Total time since action initiated: ${(totalElapsed / 1000).toFixed(2)}s`);
+    
+    // Update ConnectionStateManager
+    stateManager.updateState(targetConnectionState, {
+      detectedFrom: `timer_based_${action}`,
+      transitionTime: transitionTime,
+      totalLatency: totalElapsed,
+      operationElapsed: operationElapsed
+    });
+    
+    console.log(`[STATE_TRANSITION] Updated ConnectionStateManager to '${targetConnectionState}'`);
+    
+    // Complete the control action (re-enables toggle) - only if not already completed
+    // For reconnect, this is completed earlier when relay proxy becomes healthy
+    if (controlManager.getPendingAction() !== null) {
+      controlManager.completeAction();
+      console.log(`[STATE_TRANSITION] Called ControlStateManager.completeAction() - toggle re-enabled`);
+    }
+    
+    console.log(`[STATE_TRANSITION] Dashboard will now display "${targetConnectionState}" status`);
+  }, transitionTime);
+}
+
 const express = require('express');
 const cors = require('cors');
 const dns = require('dns').promises;
@@ -83,6 +125,201 @@ const util = require('util');
 
 const execPromise = util.promisify(exec);
 const app = express();
+
+// Import monitoring components
+const LogMonitor = require('./src/monitoring/LogMonitor');
+const LogPatternParser = require('./src/monitoring/LogPatternParser');
+const ConnectionStateManager = require('./src/monitoring/ConnectionStateManager');
+const ControlStateManager = require('./src/monitoring/ControlStateManager');
+
+// Import Docker control functions
+const { stopSquidProxy, startSquidProxy, getSquidProxyStatus } = require('./src/docker/squidProxyControl');
+
+// Instantiate monitoring components
+const logMonitor = new LogMonitor('relay-proxy');
+const logParser = new LogPatternParser();
+const stateManager = new ConnectionStateManager();
+const controlManager = new ControlStateManager();
+
+// Initialize connection state detection
+// This queries the relay proxy status endpoint to detect initial state
+// when the relay proxy is already in a stable state at startup
+stateManager.initialize()
+  .then(() => {
+    console.log('[ConnectionStateManager] Initialization complete');
+  })
+  .catch((error) => {
+    console.warn(`[ConnectionStateManager] Initialization failed: ${error.message}`);
+    // Don't block server startup - log pattern detection will serve as fallback
+  });
+
+// Wire up event handlers between components
+// LogMonitor -> LogPatternParser
+logMonitor.on('log_line', (event) => {
+  logParser.parseLine(event.line);
+});
+
+// LogPatternParser -> ConnectionStateManager
+logParser.on('connection_detected', (event) => {
+  // Log connection detection with structured logging
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'INFO',
+    component: 'LogPatternParser',
+    event: 'connection_detected',
+    pattern: event.pattern,
+    logLine: event.line,
+    message: 'Connection pattern detected in relay proxy logs'
+  }));
+  
+  stateManager.updateState('connected', {
+    detectedFrom: 'log_pattern',
+    logLine: event.line,
+    detectionLatency: controlManager.actionStartTime 
+      ? Date.now() - controlManager.actionStartTime 
+      : null
+  });
+});
+
+logParser.on('disconnection_detected', (event) => {
+  // Log disconnection detection with structured logging
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'INFO',
+    component: 'LogPatternParser',
+    event: 'disconnection_detected',
+    pattern: event.pattern,
+    logLine: event.line,
+    message: 'Disconnection pattern detected in relay proxy logs'
+  }));
+  
+  stateManager.updateState('disconnected', {
+    detectedFrom: 'log_pattern',
+    logLine: event.line,
+    detectionLatency: controlManager.actionStartTime 
+      ? Date.now() - controlManager.actionStartTime 
+      : null
+  });
+});
+
+// ConnectionStateManager -> ControlStateManager
+stateManager.on('state_changed', (event) => {
+  // Log state change with structured logging
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'INFO',
+    component: 'ConnectionStateManager',
+    event: 'state_changed',
+    previousState: event.previousState,
+    newState: event.newState,
+    message: `Connection state changed: ${event.previousState} -> ${event.newState}`
+  }));
+  
+  // Complete the pending action when state changes
+  controlManager.completeAction();
+});
+
+// Error handling for monitoring components with structured logging
+
+// LogMonitor error handler - handles Docker socket, container not found, and process errors
+logMonitor.on('error', (errorEvent) => {
+  const { error, context, containerName, exitCode } = errorEvent;
+  
+  // Structured error logging
+  console.error(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'ERROR',
+    component: 'LogMonitor',
+    context: context,
+    containerName: containerName,
+    exitCode: exitCode,
+    error: error.message,
+    stack: error.stack
+  }));
+  
+  // Provide user-friendly context-specific messages
+  if (context === 'container_not_found') {
+    console.error(`[LogMonitor] Container '${containerName}' not found. Monitoring stopped.`);
+  } else if (context === 'docker_daemon_error') {
+    console.error(`[LogMonitor] Docker daemon error. Check Docker socket access.`);
+  } else if (context === 'process_spawn') {
+    console.error(`[LogMonitor] Failed to spawn Docker logs process. Docker may not be available.`);
+  } else if (context === 'restart_failed') {
+    console.error(`[LogMonitor] Max restart attempts reached. Manual intervention required.`);
+  }
+});
+
+// LogMonitor stopped event handler
+logMonitor.on('stopped', (event) => {
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'INFO',
+    component: 'LogMonitor',
+    event: 'stopped',
+    reason: event.reason
+  }));
+});
+
+// LogPatternParser warning handler - handles unrecognized patterns
+logParser.on('unknown_pattern', (event) => {
+  console.warn(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'WARN',
+    component: 'LogPatternParser',
+    event: 'unknown_pattern',
+    signature: event.signature,
+    count: event.count,
+    message: event.message,
+    fullLine: event.fullLine
+  }));
+  
+  console.warn(`[LogPatternParser] Frequent unrecognized pattern detected (${event.count} occurrences): "${event.signature}..."`);
+  console.warn(`[LogPatternParser] Consider adding this pattern to known connection/disconnection patterns.`);
+});
+
+// ControlStateManager timeout handler - handles action timeouts
+controlManager.on('action_timeout', (event) => {
+  console.error(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'ERROR',
+    component: 'ControlStateManager',
+    event: 'action_timeout',
+    action: event.action,
+    timeout: event.timeout,
+    message: `Action '${event.action}' timed out after ${event.timeout}ms without state confirmation`
+  }));
+  
+  console.error(`[ControlStateManager] Action '${event.action}' timed out after ${event.timeout / 1000} seconds.`);
+  console.error(`[ControlStateManager] No state change confirmation received from log monitoring.`);
+  console.error(`[ControlStateManager] Toggle control has been re-enabled. User can retry the action.`);
+});
+
+// ControlStateManager control state change handlers
+controlManager.on('control_disabled', (event) => {
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'INFO',
+    component: 'ControlStateManager',
+    event: 'control_disabled',
+    action: event.action,
+    message: `Toggle control disabled for action: ${event.action}`
+  }));
+});
+
+controlManager.on('control_enabled', (event) => {
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'INFO',
+    component: 'ControlStateManager',
+    event: 'control_enabled',
+    completedAction: event.completedAction,
+    latency: event.latency,
+    reason: event.reason,
+    message: event.completedAction 
+      ? `Toggle control enabled after completing action: ${event.completedAction} (latency: ${event.latency}ms)`
+      : `Toggle control enabled (reason: ${event.reason})`
+  }));
+});
 
 // Handle unhandled promise rejections to prevent crashes
 process.on('unhandledRejection', (reason, promise) => {
@@ -131,31 +368,6 @@ function logError(endpoint, error, context = {}) {
   }));
 }
 
-// Helper function to get container IP address
-async function getContainerIP(containerName) {
-  try {
-    const { stdout } = await execPromise(
-      `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${containerName}`
-    );
-    const ip = stdout.trim();
-    
-    if (!ip) {
-      throw new Error(`Container ${containerName} has no IP address. Container may not be running or not connected to a network.`);
-    }
-    
-    return ip;
-  } catch (error) {
-    // Check if error is due to container not existing
-    if (error.message.includes('no such object') || 
-        error.message.includes('No such object') || 
-        error.message.includes('No such container')) {
-      throw new Error(`Container ${containerName} does not exist`);
-    }
-    
-    // Re-throw with more context
-    throw new Error(`Failed to get IP for container ${containerName}: ${error.message}`);
-  }
-}
 
 // Helper function to check if container is running
 async function checkContainerRunning(containerName) {
@@ -170,135 +382,11 @@ async function checkContainerRunning(containerName) {
   }
 }
 
-// Helper function to resolve LaunchDarkly domains to IP addresses (uses Node dns, no dig required)
-async function resolveLaunchDarklyDomains() {
-  const domains = [
-    'stream.launchdarkly.com',        // Server-side streaming (relay proxy)
-    'clientstream.launchdarkly.com',  // Client-side streaming
-    'app.launchdarkly.com',           // Polling endpoint
-    'events.launchdarkly.com'         // Events endpoint
-  ];
-  
-  const ips = new Set();
-  
-  for (const domain of domains) {
-    try {
-      const resolvedIPs = await dns.resolve4(domain);
-      resolvedIPs.filter(ip => /^\d+\.\d+\.\d+\.\d+$/.test(ip)).forEach(ip => ips.add(ip));
-    } catch (error) {
-      // Log warning but continue with other domains
-      console.warn(`Failed to resolve ${domain}:`, error.message);
-    }
-  }
-  
-  return Array.from(ips);
-}
 
-// Helper function to add iptables blocking rules
-async function addBlockingRules(containerIP, targetIPs) {
-  let rulesAdded = 0;
-  
-  for (const targetIP of targetIPs) {
-    try {
-      // Check if rule already exists
-      // iptables -C returns exit code 0 if rule exists, non-zero if it doesn't
-      try {
-        await execPromise(
-          `iptables -C FORWARD -s ${containerIP} -d ${targetIP} -j DROP`
-        );
-        // Rule already exists, skip adding
-        console.log(`Rule already exists for ${containerIP} -> ${targetIP}`);
-      } catch (checkError) {
-        // Rule doesn't exist, add it
-        await execPromise(
-          `iptables -I FORWARD -s ${containerIP} -d ${targetIP} -j DROP`
-        );
-        rulesAdded++;
-        console.log(`Added blocking rule for ${containerIP} -> ${targetIP}`);
-      }
-    } catch (error) {
-      console.error(`Failed to add rule for ${targetIP}:`, error.message);
-    }
-  }
-  
-  return rulesAdded;
-}
 
-// Helper function to remove iptables blocking rules
-async function removeBlockingRules(containerIP) {
-  let rulesRemoved = 0;
-  
-  try {
-    // List all rules matching our pattern
-    const { stdout } = await execPromise(
-      `iptables -S FORWARD | grep "\\-s ${containerIP}.*\\-j DROP"`
-    );
-    
-    const rules = stdout.trim().split('\n').filter(r => r.trim());
-    
-    for (const rule of rules) {
-      // Convert -A to -D for deletion
-      const deleteRule = rule.replace('-A FORWARD', '-D FORWARD');
-      
-      try {
-        await execPromise(`iptables ${deleteRule}`);
-        rulesRemoved++;
-        console.log(`Removed blocking rule: ${rule}`);
-      } catch (error) {
-        console.error(`Failed to remove rule: ${rule}`, error.message);
-      }
-    }
-  } catch (error) {
-    // No rules found or error listing rules
-    console.log('No blocking rules found or error listing rules:', error.message);
-  }
-  
-  return rulesRemoved;
-}
 
-// Helper function to check if disconnection is active
-async function checkDisconnectionStatus() {
-  try {
-    const containerIP = await getContainerIP('relay-proxy');
-    const { stdout } = await execPromise(
-      `iptables -S FORWARD | grep "\\-s ${containerIP}.*\\-j DROP" | wc -l`
-    );
-    return parseInt(stdout.trim()) > 0;
-  } catch (error) {
-    return false;
-  }
-}
 
-// Helper function to count active blocking rules
-async function countBlockingRules(containerIP) {
-  try {
-    const { stdout } = await execPromise(
-      `iptables -S FORWARD | grep "\\-s ${containerIP}.*\\-j DROP" | wc -l`
-    );
-    return parseInt(stdout.trim());
-  } catch (error) {
-    return 0;
-  }
-}
 
-// Helper function to get list of blocked IPs
-async function getBlockedIPs(containerIP) {
-  try {
-    const { stdout } = await execPromise(
-      `iptables -S FORWARD | grep "\\-s ${containerIP}.*\\-j DROP"`
-    );
-    
-    const rules = stdout.trim().split('\n').filter(r => r.trim());
-    const ips = rules.map(rule => {
-      const match = rule.match(/-d ([0-9.]+)/);
-      return match ? match[1] : null;
-    }).filter(ip => ip);
-    
-    return ips;
-  } catch (error) {
-    return [];
-  }
-}
 
 // Helper function to fetch with timeout
 async function fetchWithTimeout(url, options = {}, timeout = 5000) {
@@ -351,123 +439,25 @@ app.get('/health', (req, res) => {
 });
 
 // Real-time Relay Proxy connection state endpoint
-// This endpoint checks the ACTUAL connection state by examining the Relay Proxy's
-// environment connection status, not just the iptables rules
+// This endpoint checks the ACTUAL connection state by examining the squid proxy status
 app.get('/api/relay-proxy/actual-connection-state', async (req, res) => {
-  const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
-  
   try {
-    // Check if container is running
-    const isRunning = await checkContainerRunning('relay-proxy');
-    if (!isRunning) {
-      return res.json({
-        state: 'CONTAINER_STOPPED',
-        connected: false,
-        message: 'Relay Proxy container is not running',
-        readyToTest: false
-      });
-    }
+    const status = await getSquidProxyStatus();
     
-    // Check if there's an iptables rule blocking the relay-proxy (broad rule only)
-    let isManuallyDisconnected = false;
-    try {
-      const containerIP = await getContainerIP('relay-proxy');
-      const subnet = await getDockerNetworkSubnet('launchdarkly-network');
-      
-      if (containerIP && subnet) {
-        const ns = 'docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i';
-        // Check for broad rule
-        try {
-          await execPromise(`${ns} iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`);
-          isManuallyDisconnected = true;
-        } catch (e) {
-          // Broad rule doesn't exist, relay-proxy is not manually disconnected
-        }
-      }
-    } catch (error) {
-      isManuallyDisconnected = false;
-    }
-    
-    // Get the Relay Proxy status
-    const response = await fetchWithTimeout(`${relayProxyUrl}/status`, {}, 3000);
-    
-    if (!response.ok) {
-      return res.json({
-        state: 'UNREACHABLE',
-        connected: false,
-        message: 'Cannot reach Relay Proxy status endpoint',
-        readyToTest: false,
-        manuallyDisconnected: isManuallyDisconnected
-      });
-    }
-    
-    const data = await response.json();
-    
-    // Check environment connection state
-    let connectionState = 'UNKNOWN';
-    let stateReason = '';
-    
-    if (data.environments) {
-      const envKeys = Object.keys(data.environments);
-      if (envKeys.length > 0) {
-        const env = data.environments[envKeys[0]];
-        
-        // Check connection status
-        if (env.connectionStatus) {
-          connectionState = env.connectionStatus.state;
-          stateReason = env.connectionStatus.stateReason || '';
-        }
-      }
-    }
-    
-    // If manually disconnected (iptables rules active) but relay still reports VALID,
-    // return DISCONNECTING state to indicate transition in progress.
-    // Dashboard will show transitioning status until relay actually detects disconnection.
-    if (isManuallyDisconnected && connectionState === 'VALID') {
-      connectionState = 'DISCONNECTING';
-      stateReason = 'Network blocked - waiting for relay to detect disconnection (5-7 minutes)';
-    } else if (isManuallyDisconnected && (connectionState === 'INITIALIZING' || connectionState === 'UNKNOWN')) {
-      connectionState = 'INTERRUPTED';
-      stateReason = 'Manually disconnected (iptables rule active)';
-    }
-    
-    // Determine if connected and ready to test
-    const isConnected = connectionState === 'VALID';
-    const isDisconnected = connectionState === 'INTERRUPTED' || connectionState === 'OFF';
-    const isDisconnecting = connectionState === 'DISCONNECTING';
-    
-    // Ready to test means the state is stable (either fully connected or fully disconnected)
-    // NOT ready during DISCONNECTING transition
-    const readyToTest = isConnected || isDisconnected;
-    
-    return res.json({
-      state: connectionState,
-      connected: isConnected,
-      disconnected: isDisconnected,
-      disconnecting: isDisconnecting,
-      stateReason: stateReason,
-      readyToTest: readyToTest,
-      manuallyDisconnected: isManuallyDisconnected,
-      message: isConnected 
-        ? 'Relay Proxy is connected to LaunchDarkly - ready to test'
-        : isDisconnected
-        ? isManuallyDisconnected 
-          ? 'Relay Proxy is manually disconnected (iptables rule active) - ready to test'
-          : 'Relay Proxy is disconnected from LaunchDarkly - ready to test'
-        : isDisconnecting
-        ? 'Relay Proxy is disconnecting - network blocked, waiting for relay to detect (5-7 minutes)'
-        : 'Relay Proxy connection state is transitioning - wait before testing',
-      timestamp: new Date().toISOString()
+    return res.status(200).json({
+      success: true,
+      manuallyDisconnected: !status.running,
+      state: status.state,
+      method: 'squid-proxy',
+      relayProxyRunning: relayProxyHealthy  // Add relay proxy running status
     });
     
   } catch (error) {
-    logError('/api/relay-proxy/actual-connection-state', error);
     return res.status(500).json({
-      state: 'ERROR',
-      connected: false,
-      readyToTest: false,
-      message: error.message,
-      timestamp: new Date().toISOString()
+      success: false,
+      error: error.message,
+      state: 'unknown',
+      relayProxyRunning: false
     });
   }
 });
@@ -937,6 +927,40 @@ app.get('/api/relay-proxy/cache/stream', async (req, res) => {
   }
 });
 
+// Connection state SSE stream endpoint
+app.get('/api/relay-proxy/connection-state/stream', async (req, res) => {
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  // Add this client to the broadcast list
+  connectionStateClients.push(res);
+  console.log(`[Connection State SSE] Client connected (${connectionStateClients.length} total)`);
+  
+  // Send initial connection state immediately
+  const initialState = {
+    state: currentConnectionState,
+    timestamp: new Date().toISOString(),
+    method: 'squid-proxy',
+    relayProxyRunning: relayProxyHealthy  // Include relay proxy running status
+  };
+  
+  res.write(`event: connection-state-change\n`);
+  res.write(`data: ${JSON.stringify(initialState)}\n\n`);
+  
+  // Handle client disconnect
+  req.on('close', () => {
+    const index = connectionStateClients.indexOf(res);
+    if (index > -1) {
+      connectionStateClients.splice(index, 1);
+    }
+    console.log(`[Connection State SSE] Client disconnected (${connectionStateClients.length} remaining)`);
+  });
+});
+
 // Relay Proxy start endpoint
 app.post('/api/relay-proxy/start', async (req, res) => {
   try {
@@ -1131,11 +1155,33 @@ app.get('/api/php/container-status', async (req, res) => {
       });
     }
     
-    // If running, container is healthy
+    // If running, check Redis availability (PHP uses Redis for daemon mode cache)
+    let redisAvailable = false;
+    try {
+      const { stdout: redisCheck } = await execPromise('docker exec redis redis-cli ping 2>&1');
+      redisAvailable = redisCheck.trim() === 'PONG';
+    } catch (error) {
+      // Redis is not responding
+      redisAvailable = false;
+    }
+    
+    // If Redis is down, PHP is degraded (using fallback variations)
+    if (!redisAvailable) {
+      return res.json({
+        connected: true,
+        running: true,
+        status: 'degraded',
+        redisAvailable: false,
+        message: 'PHP running with fallback variations (Redis unavailable)'
+      });
+    }
+    
+    // If running and Redis is available, container is healthy
     res.json({
       connected: true,
       running: true,
-      status: 'healthy'
+      status: 'healthy',
+      redisAvailable: true
     });
   } catch (error) {
     logError('/api/php/container-status', error, {
@@ -2036,170 +2082,49 @@ app.post('/api/load-test', async (req, res) => {
   }
 });
 
-// Helper function to ensure DOCKER-USER chain exists
-async function ensureDockerUserChain() {
-  try {
-    // Check if DOCKER-USER chain exists
-    await execPromise('iptables -L DOCKER-USER -n 2>&1');
-  } catch (error) {
-    // Chain doesn't exist, create it
-    try {
-      await execPromise('iptables -N DOCKER-USER');
-      // Add a rule to jump back to RETURN (allow by default)
-      await execPromise('iptables -A DOCKER-USER -j RETURN');
-      console.log('Created DOCKER-USER chain');
-    } catch (createError) {
-      console.error('Failed to create DOCKER-USER chain:', createError.message);
-      throw createError;
-    }
-  }
-}
 
-// Helper function to get Docker network subnet
-async function getDockerNetworkSubnet(networkName) {
-  try {
-    // Try with the full compose project name prefix first
-    let fullNetworkName = `launchdarkly-relay-proxy-enterprise-demo_${networkName}`;
-    let { stdout } = await execPromise(
-      `docker network inspect ${fullNetworkName} --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || echo ""`
-    );
-    
-    if (!stdout.trim()) {
-      // Try without prefix
-      ({ stdout } = await execPromise(
-        `docker network inspect ${networkName} --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || echo ""`
-      ));
-    }
-    
-    return stdout.trim() || null;
-  } catch (error) {
-    console.error(`Failed to get subnet for network ${networkName}:`, error.message);
-    return null;
-  }
-}
 
 // Relay Proxy disconnect endpoint
 app.post('/api/relay-proxy/disconnect', async (req, res) => {
   try {
     const disconnectStartTime = Date.now();
-    console.log(`[TIMING] Disconnect initiated at ${new Date(disconnectStartTime).toISOString()}`);
     
-    // 1. Check if container is running
-    const isRunning = await checkContainerRunning('relay-proxy');
-    if (!isRunning) {
-      return res.status(500).json({
+    // Initiate action in control manager (disables toggle control)
+    const controlResult = controlManager.initiateAction('disconnect');
+    if (!controlResult.success) {
+      return res.status(409).json({
         success: false,
-        error: 'Container relay-proxy is not running'
+        error: controlResult.error,
+        message: controlResult.message
       });
     }
     
-    // 2. Ensure DOCKER-USER chain exists
-    await ensureDockerUserChain();
+    // Stop squid proxy container
+    const result = await stopSquidProxy();
     
-    // 3. Get container IP address
-    const containerIP = await getContainerIP('relay-proxy');
-    
-    // 4. Get Docker network subnet to allow internal traffic
-    const subnet = await getDockerNetworkSubnet('launchdarkly-network');
-    if (!subnet) {
+    if (!result.success) {
+      controlManager.completeAction();
       return res.status(500).json({
         success: false,
-        error: 'Failed to determine Docker network subnet'
+        error: result.error
       });
     }
     
-    // 5. Check if already disconnected by checking for existing rule on the Docker host
-    try {
-      await execPromise(
-        `docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`
-      );
-      // If command succeeds, rule exists - but we should still restart to ensure disconnection
-      console.log('Rule already exists, will restart relay-proxy to ensure disconnection');
-    } catch (error) {
-      // Rule doesn't exist, will add it
-    }
-    
-    // 6. Kill existing TCP connections from relay-proxy to external services
-    // Use broad REJECT rule to send RST packets to all external connections
-    // This is more reliable than targeting specific IPs because LaunchDarkly uses dynamic DNS
-    console.log('Killing existing TCP connections to external services...');
-    const nsenter = 'docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i';
-    
-    try {
-      // Add temporary REJECT rule to kill existing connections
-      await execPromise(`${nsenter} iptables -I DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`);
-      console.log('Added temporary REJECT rule to kill existing connections');
-      
-      // Wait for RST packets to be sent
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Remove the temporary REJECT rule
-      await execPromise(`${nsenter} iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j REJECT --reject-with tcp-reset`);
-      console.log('Removed temporary REJECT rule');
-    } catch (error) {
-      console.log('Note: Could not kill connections with iptables REJECT:', error.message);
-    }
-    
-    // 7. Add permanent DROP rule to block all external traffic (except internal Docker subnet)
-    // This blocks ALL external traffic from relay-proxy, preventing it from reaching LaunchDarkly
-    // regardless of which IPs LaunchDarkly is using
-    try {
-      // First remove any existing broad rule
-      try {
-        await execPromise(`${nsenter} iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>/dev/null || true`);
-      } catch (e) { /* ignore */ }
-      
-      // Add permanent DROP rule
-      await execPromise(`${nsenter} iptables -I DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP`);
-      console.log(`Added broad DROP rule: block ${containerIP} -> all external traffic (except ${subnet})`);
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        error: `Failed to add iptables rule: ${error.message}`
-      });
-    }
-    
-    // 8. Don't restart the container - let it keep serving cached data
-    // The iptables rule will block new connections to LaunchDarkly
-    console.log('Relay-proxy disconnected - cache remains available for downstream clients');
-    
-    const iptablesAppliedTime = Date.now();
-    const iptablesElapsed = iptablesAppliedTime - disconnectStartTime;
-    console.log(`[TIMING] iptables rule applied in ${(iptablesElapsed / 1000).toFixed(2)} seconds`);
-    
-    // Start background monitoring to detect when Relay Proxy realizes it's disconnected
-    console.log('[TIMING] Starting background monitoring to detect when Relay Proxy realizes disconnection...');
-    monitorRelayProxyConnectionState('disconnect', disconnectStartTime).then(result => {
-      if (result.detected) {
-        console.log(`[TIMING] === DISCONNECT SUMMARY ===`);
-        console.log(`[TIMING] iptables rule applied: ${(iptablesElapsed / 1000).toFixed(2)}s`);
-        console.log(`[TIMING] Relay Proxy detected disconnection: ${(result.elapsed / 1000).toFixed(2)}s`);
-        console.log(`[TIMING] Time for Relay Proxy to realize connection is gone: ${((result.elapsed - iptablesElapsed) / 1000).toFixed(2)}s`);
-        console.log(`[CONNECTION STATE] Relay Proxy is now DISCONNECTED - ready to test disconnected behavior`);
-      }
-    });
+    // Start background monitoring
+    monitorRelayProxyConnectionState('disconnect', disconnectStartTime);
     
     return res.status(200).json({
       success: true,
-      message: 'Relay Proxy disconnected from LaunchDarkly',
-      containerIP,
-      subnet,
-      rule: `Block ${containerIP} -> all external traffic (except ${subnet})`,
-      timing: {
-        disconnectStarted: new Date(disconnectStartTime).toISOString(),
-        iptablesApplied: new Date(iptablesAppliedTime).toISOString(),
-        iptablesElapsedMs: iptablesElapsed
-      }
+      action: 'disconnect_initiated',
+      message: 'Squid proxy stopped. Relay proxy disconnected.',
+      controlEnabled: false
     });
     
   } catch (error) {
-    logError('/api/relay-proxy/disconnect', error, {
-      operation: 'disconnect'
-    });
-    
+    controlManager.completeAction();
     return res.status(500).json({
       success: false,
-      error: error.message || 'Failed to disconnect relay proxy'
+      error: error.message
     });
   }
 });
@@ -2208,184 +2133,334 @@ app.post('/api/relay-proxy/disconnect', async (req, res) => {
 app.post('/api/relay-proxy/reconnect', async (req, res) => {
   try {
     const reconnectStartTime = Date.now();
-    console.log(`[TIMING] Reconnect initiated at ${new Date(reconnectStartTime).toISOString()}`);
     
-    // 1. Get container IP address
-    const containerIP = await getContainerIP('relay-proxy');
-    
-    // 2. Get Docker network subnet
-    const subnet = await getDockerNetworkSubnet('launchdarkly-network');
-    if (!subnet) {
-      return res.status(500).json({
+    // Initiate action in control manager (disables toggle control)
+    const controlResult = controlManager.initiateAction('reconnect');
+    if (!controlResult.success) {
+      return res.status(409).json({
         success: false,
-        error: 'Failed to determine Docker network subnet'
+        error: controlResult.error,
+        message: controlResult.message
       });
     }
     
-    // 3. Clean up ALL blocking rules for this subnet (not just current relay-proxy IP)
-    // This handles cases where containers were restarted and got new IPs
-    let rulesRemoved = 0;
-    try {
-      // List all DROP rules in DOCKER-USER chain
-      const { stdout } = await execPromise(
-        `docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i iptables -S DOCKER-USER 2>&1 | grep "DROP" || true`
-      );
-      
-      if (stdout.trim()) {
-        const rules = stdout.trim().split('\n').filter(r => r.trim());
-        console.log(`Found ${rules.length} DROP rules to clean up`);
-        
-        // Batch all rule deletions into a single command for performance
-        const nsenter = 'docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i sh -c';
-        let cmd = '';
-        for (const rule of rules) {
-          // Convert -A to -D for deletion
-          const deleteRule = rule.replace('-A DOCKER-USER', '-D DOCKER-USER');
-          // Add each deletion to the batch command with error suppression
-          cmd += `iptables ${deleteRule} 2>/dev/null || true; `;
-        }
-        
-        try {
-          await execPromise(`${nsenter} "${cmd}"`);
-          rulesRemoved = rules.length;
-          console.log(`Removed ${rulesRemoved} blocking rules in batch`);
-        } catch (error) {
-          console.error(`Failed to remove rules in batch:`, error.message);
-        }
-      }
-    } catch (error) {
-      console.log('Note: Error cleaning up rules:', error.message);
+    // Start squid proxy container
+    const result = await startSquidProxy();
+    
+    if (!result.success) {
+      controlManager.completeAction();
+      return res.status(500).json({
+        success: false,
+        error: result.error
+      });
     }
     
-    // 4. Verify no rules remain for current relay-proxy IP
-    try {
-      await execPromise(
-        `docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`
-      );
-      // Rule still exists, try to remove it specifically
-      await execPromise(
-        `docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i iptables -D DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP`
-      );
-      rulesRemoved++;
-      console.log(`Removed specific rule for ${containerIP}`);
-    } catch (error) {
-      // Rule doesn't exist, which is good
-    }
-    
-    // 5. Calculate timing for iptables cleanup
-    const iptablesRemovedTime = Date.now();
-    const iptablesElapsed = iptablesRemovedTime - reconnectStartTime;
-    console.log(`[TIMING] iptables cleanup completed in ${(iptablesElapsed / 1000).toFixed(2)} seconds (${rulesRemoved} rules removed)`);
-    
-    // 6. Start background monitoring to detect when Relay Proxy successfully reconnects
-    console.log('[TIMING] Starting background monitoring to detect when Relay Proxy successfully reconnects...');
-    monitorRelayProxyConnectionState('reconnect', reconnectStartTime).then(result => {
-      if (result.detected) {
-        console.log(`[TIMING] === RECONNECT SUMMARY ===`);
-        console.log(`[TIMING] iptables rule removed: ${(iptablesElapsed / 1000).toFixed(2)}s`);
-        console.log(`[TIMING] Relay Proxy successfully reconnected: ${(result.elapsed / 1000).toFixed(2)}s`);
-        console.log(`[TIMING] Time from network available to successful reconnection: ${((result.elapsed - iptablesElapsed) / 1000).toFixed(2)}s`);
-        console.log(`[CONNECTION STATE] Relay Proxy is now CONNECTED - ready to test connected behavior`);
-      } else if (result.timeout) {
-        console.log(`[TIMING] === RECONNECT TIMEOUT ===`);
-        console.log(`[TIMING] Relay Proxy did not reconnect within monitoring period`);
-        console.log(`[TIMING] Last known state: ${result.state}`);
-      }
-    });
+    // Start background monitoring
+    monitorRelayProxyConnectionState('reconnect', reconnectStartTime);
     
     return res.status(200).json({
       success: true,
-      message: 'Relay Proxy reconnected to LaunchDarkly',
-      containerIP,
-      subnet,
-      timing: {
-        reconnectStarted: new Date(reconnectStartTime).toISOString(),
-        iptablesRemoved: new Date(iptablesRemovedTime).toISOString(),
-        iptablesElapsedMs: iptablesElapsed
-      }
+      action: 'reconnect_initiated',
+      message: 'Squid proxy started. Relay proxy reconnected.',
+      controlEnabled: false
     });
     
   } catch (error) {
-    logError('/api/relay-proxy/reconnect', error, {
-      operation: 'reconnect'
-    });
-    
+    controlManager.completeAction();
     return res.status(500).json({
       success: false,
-      error: error.message || 'Failed to reconnect relay proxy'
-    });
-  }
-});
-
-// Relay Proxy connection status endpoint
-app.get('/api/relay-proxy/connection-status', async (req, res) => {
-  try {
-    // 1. Check if container is running
-    const isRunning = await checkContainerRunning('relay-proxy');
-    if (!isRunning) {
-      return res.status(200).json({
-        connected: false,
-        containerRunning: false
-      });
-    }
-    
-    // 2. Get container IP and network subnet
-    const containerIP = await getContainerIP('relay-proxy');
-    const subnet = await getDockerNetworkSubnet('launchdarkly-network');
-    
-    if (!subnet) {
-      return res.status(200).json({
-        connected: true, // Assume connected if we can't check
-        containerRunning: true,
-        error: 'Could not determine network subnet'
-      });
-    }
-    
-    // 3. Check if blocking rule exists (broad rule only)
-    const ns = 'docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -n -i';
-    let hasBlockingRule = false;
-    try {
-      await execPromise(`${ns} iptables -C DOCKER-USER -s ${containerIP} ! -d ${subnet} -j DROP 2>&1`);
-      hasBlockingRule = true;
-    } catch (e) { 
-      // Broad rule doesn't exist, relay-proxy is connected
-    }
-    
-    return res.status(200).json({
-      connected: !hasBlockingRule,
-      containerRunning: true,
-      containerIP,
-      subnet
-    });
-    
-  } catch (error) {
-    logError('/api/relay-proxy/connection-status', error, {
-      operation: 'connection-status'
-    });
-    
-    return res.status(500).json({
-      connected: false,
-      containerRunning: false,
       error: error.message
     });
   }
 });
 
+// GET /api/relay-proxy/connection-state endpoint
+// Returns current connection state detected from log monitoring
+app.get('/api/relay-proxy/connection-state', async (req, res) => {
+  try {
+    // Get current state from StateManager
+    const currentState = stateManager.getCurrentState();
+    
+    // Get control state from ControlManager
+    const controlEnabled = controlManager.isControlEnabled();
+    const pendingAction = controlManager.getPendingAction();
+    
+    // Get the last history entry for metadata
+    const history = stateManager.getStateHistory(1);
+    const metadata = history.length > 0 ? history[0].metadata : {};
+    
+    return res.json({
+      state: currentState.state,
+      timestamp: currentState.timestamp,
+      controlEnabled: controlEnabled,
+      pendingAction: pendingAction,
+      metadata: metadata,
+      relayProxyRunning: relayProxyHealthy  // Include relay proxy running status
+    });
+  } catch (error) {
+    logError('/api/relay-proxy/connection-state', error);
+    return res.status(500).json({
+      error: error.message
+    });
+  }
+});
+
+// GET /api/relay-proxy/connection-state/history endpoint
+// Returns connection state change history
+app.get('/api/relay-proxy/connection-state/history', async (req, res) => {
+  try {
+    // Parse limit parameter with default of 10
+    const limit = parseInt(req.query.limit) || 10;
+    
+    // Get history from StateManager (automatically clamped to 1-100)
+    const history = stateManager.getStateHistory(limit);
+    
+    // Get total entries count
+    const totalEntries = stateManager.getCurrentState().historySize;
+    
+    return res.json({
+      history: history,
+      totalEntries: totalEntries
+    });
+  } catch (error) {
+    logError('/api/relay-proxy/connection-state/history', error);
+    return res.status(500).json({
+      error: error.message
+    });
+  }
+});
+
+
+
 // Export app and helper functions for testing
-module.exports = { app, logError, fetchWithTimeout, getContainerIP, checkContainerRunning, resolveLaunchDarklyDomains, addBlockingRules, removeBlockingRules, checkDisconnectionStatus, countBlockingRules, getBlockedIPs };
+module.exports = { 
+  app, 
+  logError, 
+  fetchWithTimeout, 
+  checkContainerRunning, 
+  // Export monitoring components
+  logMonitor,
+  logParser,
+  stateManager,
+  controlManager,
+  // Export cleanup function for tests
+  cleanup
+};
 
 // Only start server if this file is run directly (not imported)
 if (require.main === module) {
   const PORT = process.env.PORT || 4000;
   const server = app.listen(PORT, () => {
     console.log(`API Service listening on port ${PORT}`);
+    
+    // Start log monitoring on server startup
+    try {
+      logMonitor.start();
+      console.log('[LogMonitor] Started monitoring relay-proxy logs');
+    } catch (error) {
+      console.error('[LogMonitor] Failed to start:', error.message);
+    }
   });
   
   // Graceful shutdown
   process.on('SIGTERM', () => {
     console.log('SIGTERM signal received: closing HTTP server');
+    
+    // Stop log monitoring
+    logMonitor.stop();
+    console.log('[LogMonitor] Stopped monitoring');
+    
     server.close(() => {
       console.log('HTTP server closed');
     });
   });
 }
+// Store SSE clients for connection state changes
+const connectionStateClients = [];
+
+// Broadcast connection state changes to all connected SSE clients
+function broadcastConnectionStateChange(stateData) {
+  const event = {
+    type: 'connection-state-change',
+    data: {
+      state: stateData.state,
+      timestamp: stateData.timestamp || new Date().toISOString(),
+      method: 'squid-proxy',
+      relayProxyRunning: stateData.relayProxyRunning  // Include relay proxy running status
+    }
+  };
+
+  console.log(`[SSE] Broadcasting connection state change to ${connectionStateClients.length} clients:`, event.data);
+
+  // Send to all connected clients
+  connectionStateClients.forEach((client, index) => {
+    try {
+      client.write(`event: ${event.type}\n`);
+      client.write(`data: ${JSON.stringify(event.data)}\n\n`);
+    } catch (error) {
+      console.error(`[SSE] Failed to send to client ${index}:`, error.message);
+    }
+  });
+}
+
+// Poll squid proxy and relay proxy status at regular intervals
+let currentConnectionState = 'unknown';
+const POLL_INTERVAL = 5000; // 5 seconds
+
+// Store interval IDs for cleanup
+let pollingIntervalId = null;
+let pollingTimeoutId = null;
+let relayProxyPollingIntervalId = null;
+let relayProxyPollingTimeoutId = null;
+
+// Determine overall connection state based on both squid and relay proxy health
+function updateOverallConnectionState(source) {
+  let newState = 'unknown';
+  
+  // Connection is only "connected" if BOTH squid proxy AND relay proxy are healthy
+  if (squidProxyHealthy && relayProxyHealthy) {
+    newState = 'connected';
+  } else if (!squidProxyHealthy) {
+    // Squid proxy is down - this is a manual disconnect
+    newState = 'disconnected';
+  } else if (!relayProxyHealthy) {
+    // Relay proxy is down but squid is up
+    // Check if we're in the middle of a reconnect action
+    const pendingAction = controlManager.getPendingAction();
+    if (pendingAction === 'reconnect') {
+      // Don't change state while reconnect is in progress
+      // This prevents flickering from disconnected -> connected -> disconnected -> connected
+      console.log(`[${source}] Relay proxy not healthy yet, but reconnect in progress - keeping current state`);
+      return;
+    }
+    newState = 'disconnected';
+  }
+  
+  if (newState !== currentConnectionState) {
+    console.log(`[${source}] Overall state changed: ${currentConnectionState} -> ${newState} (squid: ${squidProxyHealthy}, relay: ${relayProxyHealthy})`);
+    currentConnectionState = newState;
+
+    // Broadcast state change to SSE clients with relay proxy running status
+    broadcastConnectionStateChange({
+      state: newState,
+      timestamp: new Date().toISOString(),
+      relayProxyRunning: relayProxyHealthy  // Add this to indicate if relay proxy container is running
+    });
+
+    // Update the ConnectionStateManager
+    stateManager.updateState(newState, {
+      detectedFrom: source,
+      squidProxyHealthy: squidProxyHealthy,
+      relayProxyHealthy: relayProxyHealthy
+    });
+  }
+}
+
+async function pollSquidProxyStatus() {
+  try {
+    const status = await getSquidProxyStatus();
+    const isHealthy = status.state === 'connected' && status.running;
+    
+    if (isHealthy !== squidProxyHealthy) {
+      squidProxyHealthy = isHealthy;
+      updateOverallConnectionState('SQUID_PROXY_POLL');
+    }
+  } catch (error) {
+    console.error('[SQUID_PROXY_POLL] Error polling squid proxy status:', error.message);
+    if (squidProxyHealthy) {
+      squidProxyHealthy = false;
+      updateOverallConnectionState('SQUID_PROXY_POLL');
+    }
+  }
+}
+
+// Poll relay proxy container status to detect if it stops
+async function pollRelayProxyHealth() {
+  try {
+    const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
+    
+    // Try to reach the relay proxy status endpoint with a short timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+    
+    const response = await fetch(`${relayProxyUrl}/status`, {
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    // If we can reach the endpoint, relay proxy is running
+    if (response.ok) {
+      // Relay proxy is reachable and healthy
+      if (!relayProxyHealthy) {
+        relayProxyHealthy = true;
+        
+        // If we're in the middle of a reconnect action, complete it now
+        const pendingAction = controlManager.getPendingAction();
+        if (pendingAction === 'reconnect') {
+          console.log('[RELAY_PROXY_HEALTH] Relay proxy healthy - completing reconnect action');
+          controlManager.completeAction();
+        }
+        
+        updateOverallConnectionState('RELAY_PROXY_HEALTH');
+      }
+    } else {
+      // Relay proxy returned an error - treat as unhealthy
+      console.warn(`[RELAY_PROXY_HEALTH] Relay proxy returned HTTP ${response.status}`);
+      if (relayProxyHealthy) {
+        relayProxyHealthy = false;
+        updateOverallConnectionState('RELAY_PROXY_HEALTH');
+      }
+    }
+  } catch (error) {
+    // Relay proxy is unreachable (container stopped, network issue, etc.)
+    if (error.name === 'AbortError') {
+      console.warn('[RELAY_PROXY_HEALTH] Relay proxy health check timeout');
+    } else {
+      console.warn(`[RELAY_PROXY_HEALTH] Relay proxy unreachable: ${error.message}`);
+    }
+    
+    if (relayProxyHealthy) {
+      relayProxyHealthy = false;
+      updateOverallConnectionState('RELAY_PROXY_HEALTH');
+    }
+  }
+}
+
+function handleRelayProxyUnreachable() {
+  // This function is no longer needed - logic moved to pollRelayProxyHealth
+}
+
+// Cleanup function to stop all intervals and timeouts
+function cleanup() {
+  if (pollingIntervalId) {
+    clearInterval(pollingIntervalId);
+    pollingIntervalId = null;
+  }
+  if (pollingTimeoutId) {
+    clearTimeout(pollingTimeoutId);
+    pollingTimeoutId = null;
+  }
+  if (relayProxyPollingIntervalId) {
+    clearInterval(relayProxyPollingIntervalId);
+    relayProxyPollingIntervalId = null;
+  }
+  if (relayProxyPollingTimeoutId) {
+    clearTimeout(relayProxyPollingTimeoutId);
+    relayProxyPollingTimeoutId = null;
+  }
+}
+
+// Start polling after a short delay to allow initialization
+pollingTimeoutId = setTimeout(() => {
+  console.log('[SQUID_PROXY_POLL] Starting squid proxy status polling (interval: 5s)');
+  pollSquidProxyStatus(); // Initial poll
+  pollingIntervalId = setInterval(pollSquidProxyStatus, POLL_INTERVAL);
+}, 2000);
+
+// Start relay proxy health checking
+relayProxyPollingTimeoutId = setTimeout(() => {
+  console.log('[RELAY_PROXY_HEALTH] Starting relay proxy health check polling (interval: 5s)');
+  pollRelayProxyHealth(); // Initial check
+  relayProxyPollingIntervalId = setInterval(pollRelayProxyHealth, POLL_INTERVAL);
+}, 2000);

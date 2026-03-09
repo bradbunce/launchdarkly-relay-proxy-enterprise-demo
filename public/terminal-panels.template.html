@@ -146,7 +146,7 @@
       
       // Start SSE connection (for Redis monitor)
       startSSE() {
-        this.eventSource = new EventSource(`http://localhost:4000/api/redis/monitor`);
+        this.eventSource = new EventSource(`http://localhost:${API_SERVICE_PORT}/api/redis/monitor`);
         this.eventSource.onmessage = (event) => {
           const data = JSON.parse(event.data);
           // Filter out PING commands (data.command for Redis monitor, data.message for others)
@@ -174,7 +174,7 @@
       startPolling() {
         const poll = async () => {
           try {
-            const response = await fetch(`http://localhost:4000/api/logs/${this.containerId}`);
+            const response = await fetch(`http://localhost:${API_SERVICE_PORT}/api/logs/${this.containerId}`);
             const data = await response.json();
             if (data.lines && Array.isArray(data.lines)) {
               this.setLines(data.lines);
@@ -238,7 +238,7 @@
         // (only for Docker log consoles, not for Redis monitor which uses SSE)
         if (this.updateMethod === 'polling') {
           try {
-            const response = await fetch(`http://localhost:4000/api/logs/${this.containerId}/clear`, {
+            const response = await fetch(`http://localhost:${API_SERVICE_PORT}/api/logs/${this.containerId}/clear`, {
               method: 'POST'
             });
             

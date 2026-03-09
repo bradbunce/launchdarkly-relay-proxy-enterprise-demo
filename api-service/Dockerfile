@@ -13,6 +13,7 @@ RUN npm ci --only=production
 
 # Copy application code
 COPY server.js ./
+COPY src/ ./src/
 
 # Expose port
 EXPOSE 4000

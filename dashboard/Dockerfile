@@ -4,8 +4,8 @@ FROM nginx:alpine
 RUN apk add --no-cache gettext
 
 # Copy static files
-COPY public/dashboard.html /usr/share/nginx/html/dashboard.template.html
-COPY public/terminal-panels.html /usr/share/nginx/html/terminal-panels.template.html
+COPY public/dashboard.template.html /usr/share/nginx/html/dashboard.template.html
+COPY public/terminal-panels.template.html /usr/share/nginx/html/terminal-panels.template.html
 COPY public/*.js /usr/share/nginx/html/
 COPY public/*.svg /usr/share/nginx/html/
 COPY public/*.png /usr/share/nginx/html/

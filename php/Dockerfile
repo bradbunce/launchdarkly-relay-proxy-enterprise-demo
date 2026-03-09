@@ -15,10 +15,14 @@ RUN docker-php-ext-install pcntl
 RUN apk add --no-cache gmp-dev \
     && docker-php-ext-install gmp
 
-# Install Redis PHP extension from Alpine repository
-RUN apk add --no-cache php83-pecl-redis \
+# Install Redis PHP extension from Alpine repository with all dependencies
+RUN apk add --no-cache php83-pecl-igbinary php83-pecl-msgpack php83-pecl-redis \
+    && ln -s /usr/lib/php83/modules/igbinary.so /usr/local/lib/php/extensions/no-debug-non-zts-20230831/igbinary.so \
+    && ln -s /usr/lib/php83/modules/msgpack.so /usr/local/lib/php/extensions/no-debug-non-zts-20230831/msgpack.so \
     && ln -s /usr/lib/php83/modules/redis.so /usr/local/lib/php/extensions/no-debug-non-zts-20230831/redis.so \
-    && docker-php-ext-enable redis
+    && echo "extension=igbinary.so" > /usr/local/etc/php/conf.d/docker-php-ext-igbinary.ini \
+    && echo "extension=msgpack.so" > /usr/local/etc/php/conf.d/docker-php-ext-msgpack.ini \
+    && echo "extension=redis.so" > /usr/local/etc/php/conf.d/docker-php-ext-redis.ini
 
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer

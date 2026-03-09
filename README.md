@@ -108,7 +108,7 @@ docker-compose logs -f
 # Node.js API: http://localhost:3000 (backend only)
 # API service: http://localhost:4000 (backend only)
 # PHP API: http://localhost:8080 (backend only)
-# React App: Port 3001 (internal only - accessible via dashboard)
+# Python API: http://localhost:5000 (backend only)
 ```
 
 ### 4. Changing Configuration
@@ -176,6 +176,161 @@ docker-compose build --no-cache php && docker-compose up -d php
 docker-compose down
 ```
 
+## Configurable Service Ports
+
+This application supports configurable service ports via environment variables, allowing you to customize port assignments to avoid conflicts or run multiple instances simultaneously.
+
+### Overview
+
+All user-facing services can be configured to use custom ports through the `.env` file:
+
+- **Dashboard** (default: 8000) - Web UI
+- **API Service** (default: 4000) - API gateway
+- **Node.js Service** (default: 3000) - Node.js SDK demo
+- **PHP Service** (default: 8080) - PHP SDK demo
+- **Python Service** (default: 5000) - Python SDK demo
+- **Squid Proxy** (default: 3128) - HTTP proxy for relay-proxy connection management
+
+**Fixed Infrastructure Ports** (cannot be changed):
+- **Relay Proxy** (8030) - Required by LaunchDarkly architecture
+- **Redis** (6379) - Required by LaunchDarkly Relay Proxy and PHP SDK
+
+**Note**: The squid-proxy service is essential for the Relay Proxy Connection Toggle feature. It enables fast, non-disruptive network disconnection testing by routing relay-proxy traffic through a controllable proxy. See the [Architecture](#squid-proxy-enabling-fast-connection-management) section for details.
+
+### Customizing Ports
+
+To customize service ports:
+
+1. **Edit the `.env` file** and modify the port variables:
+
+```bash
+# Example: Custom port configuration
+DASHBOARD_PORT=9000
+API_SERVICE_PORT=9001
+NODE_SERVICE_PORT=9002
+PHP_SERVICE_PORT=9003
+PYTHON_SERVICE_PORT=9004
+SQUID_PROXY_PORT=9005
+```
+
+2. **Restart the services** to apply changes:
+
+```bash
+docker-compose down
+docker-compose up -d
+```
+
+3. **Access services on new ports**:
+
+```bash
+# Dashboard UI
+http://localhost:9000
+
+# API Service
+http://localhost:9001
+
+# Node.js Service
+http://localhost:9002
+```
+
+### Why Some Ports Are Fixed
+
+The Relay Proxy (8030) and Redis (6379) ports are hardcoded and cannot be changed because:
+
+- **Relay Proxy (8030)**: LaunchDarkly's architecture requires the Relay Proxy to run on port 8030 for proper SDK integration and event forwarding
+- **Redis (6379)**: The standard Redis port is required by the LaunchDarkly Relay Proxy configuration and PHP SDK daemon mode
+
+These ports are only accessible within the Docker network and are not exposed to the host machine by default, minimizing the risk of conflicts.
+
+### Troubleshooting Port Conflicts
+
+If you encounter "port already in use" errors:
+
+**1. Identify the conflicting port:**
+
+The error message will indicate which port is in conflict:
+```
+Error: bind: address already in use
+```
+
+**2. Find the process using the port:**
+
+On macOS/Linux:
+```bash
+lsof -i :8000
+```
+
+On Windows:
+```bash
+netstat -ano | findstr :8000
+```
+
+**3. Resolve the conflict:**
+
+Option A: Stop the conflicting process
+```bash
+# macOS/Linux
+kill <PID>
+
+# Windows
+taskkill /PID <PID> /F
+```
+
+Option B: Change the port in `.env` file
+```bash
+# Edit .env and change the conflicting port
+DASHBOARD_PORT=8888
+```
+
+**4. Restart services:**
+```bash
+docker-compose down
+docker-compose up -d
+```
+
+### Running Multiple Instances
+
+You can run multiple instances of the application on the same machine by using different port configurations:
+
+**Instance 1** (`.env`):
+```bash
+DASHBOARD_PORT=8000
+API_SERVICE_PORT=4000
+NODE_SERVICE_PORT=3000
+PHP_SERVICE_PORT=8080
+PYTHON_SERVICE_PORT=5000
+SQUID_PROXY_PORT=3128
+```
+
+**Instance 2** (`.env.instance2`):
+```bash
+DASHBOARD_PORT=9000
+API_SERVICE_PORT=9001
+NODE_SERVICE_PORT=9002
+PHP_SERVICE_PORT=9003
+PYTHON_SERVICE_PORT=9004
+SQUID_PROXY_PORT=9005
+```
+
+Start the second instance:
+```bash
+docker-compose --env-file .env.instance2 -p demo-instance2 up -d
+```
+
+### CORS Implications
+
+When you change the dashboard port, the backend services automatically update their CORS (Cross-Origin Resource Sharing) configurations to allow requests from the new port. This is handled automatically through environment variables:
+
+- **Node.js Service**: Reads `DASHBOARD_PORT` and allows `http://localhost:${DASHBOARD_PORT}`
+- **Python Service**: Reads `DASHBOARD_PORT` and allows `http://localhost:${DASHBOARD_PORT}`
+- **PHP Service**: Reads `DASHBOARD_PORT` and allows `http://localhost:${DASHBOARD_PORT}`
+
+No manual CORS configuration is needed when changing ports.
+
+### Port Configuration Reference
+
+For complete details on port configuration, including architecture diagrams and advanced scenarios, see [PORTS.md](PORTS.md).
+
 ## Application Features
 
 ### User Interface
@@ -195,8 +350,8 @@ The demo application provides:
 The dashboard includes a connection toggle that allows you to simulate network disconnection scenarios between the Relay Proxy and LaunchDarkly without stopping the container. This feature is useful for testing how your application behaves when flag updates are unavailable.
 
 **What It Does:**
-- **Disconnect**: Blocks outbound network traffic from the Relay Proxy to LaunchDarkly using iptables rules
-- **Reconnect**: Removes blocking rules to restore connectivity
+- **Disconnect**: Stops the squid-proxy container to block outbound network traffic from the Relay Proxy to LaunchDarkly
+- **Reconnect**: Starts the squid-proxy container to restore connectivity
 - **Status Display**: Shows current connection state (Connected/Disconnected/Container Stopped)
 
 **How to Use:**
@@ -215,8 +370,8 @@ The dashboard includes a connection toggle that allows you to simulate network d
 - Relay Proxy uses **exponential backoff** when attempting to reconnect (starts at ~3 seconds, increases to 60+ seconds)
 
 **Important - Disconnection Delay:**
-When you toggle "Disconnect", the iptables rule is applied immediately, but the **existing streaming connection takes 30 seconds to 2 minutes to fully shut down**. This is normal TCP behavior:
-- The iptables DROP rule blocks new connections immediately
+When you toggle "Disconnect", the squid-proxy container is stopped immediately, but the **existing streaming connection takes 30 seconds to 2 minutes to fully shut down**. This is normal TCP behavior:
+- Stopping squid-proxy blocks new connections immediately
 - The existing streaming connection remains alive until it detects the network is down
 - TCP keepalive and application-level timeouts cause the connection to eventually fail
 - You'll see timeout errors in the Relay Proxy logs after 30-120 seconds
@@ -251,17 +406,15 @@ The dashboard automatically detects the specific cause of degradation by examini
 This helps you quickly identify whether the issue is with LaunchDarkly connectivity, Redis availability, or both.
 
 **Technical Details:**
-- Uses iptables FORWARD chain rules to block traffic
-- Blocks traffic to LaunchDarkly domains: `clientstream.launchdarkly.com`, `app.launchdarkly.com`, `events.launchdarkly.com`
-- Resolves domains to IP addresses at disconnect time
+- Uses Docker container stop/start commands to control squid-proxy
+- Blocks all outbound traffic from relay-proxy when squid-proxy is stopped
 - Connection state persists across dashboard refreshes
 - Automatic status polling every 5 seconds
 
 **Limitations:**
-- **IP Address Changes**: If LaunchDarkly changes their IP addresses, you may need to reconnect and disconnect again
-- **DNS Caching**: DNS resolution happens at disconnect time; new IPs won't be blocked until next disconnect
-- **Container Restart**: Restarting the Relay Proxy container automatically clears all blocking rules (returns to connected state)
-- **Requires Root**: API service container must run as root to execute iptables commands (already configured in docker-compose.yml)
+- **Container State**: Stopping squid-proxy blocks all relay-proxy outbound traffic
+- **Container Restart**: Restarting the Relay Proxy container maintains the current squid-proxy state
+- **Requires Docker Access**: API service container must have Docker socket access (already configured in docker-compose.yml)
 
 **Auto-Configuration and Offline Resilience:**
 
@@ -275,7 +428,7 @@ This demo uses the Relay Proxy's **auto-configuration mode** (`AUTO_CONFIG_KEY`)
 
 **Critical Limitation - Why We Can't Restart During Disconnection:**
 
-The disconnect feature uses iptables rules to block network traffic **without restarting the container**. This is intentional because:
+The disconnect feature stops the squid-proxy container to block network traffic **without restarting the relay-proxy container**. This is intentional because:
 
 **Auto-Config Mode Dependency:**
 - This demo uses **auto-config mode** for easy setup (single `RELAY_PROXY_CONFIG_KEY` environment variable)
@@ -729,9 +882,9 @@ Requests/sec: 4118.44
 
 ## Architecture
 
-### 7-Container Architecture
+### 8-Container Architecture
 
-This application uses a microservices architecture with seven specialized containers:
+This application uses a microservices architecture with eight specialized containers:
 
 **dashboard** (Dashboard UI Container):
 - Nginx Alpine
@@ -771,19 +924,20 @@ This application uses a microservices architecture with seven specialized contai
 - Port: 8080
 - Purpose: LaunchDarkly PHP SDK demonstration
 
-**react-app-dev** (React Application Container):
-- Node.js 24 Alpine (build stage)
-- Nginx Alpine + Node.js 24 (production stage)
-- LaunchDarkly React Client SDK v3.9.0
+**dashboard** (Dashboard UI Container - includes JavaScript Client):
+- Nginx Alpine
+- Serves static web UI (HTML, CSS, JavaScript)
+- LaunchDarkly JavaScript Client SDK v3.9.0 (runs in browser)
 - **Fixed Mode**: Proxy Mode (Client-Side) only
-- Port: 3001
-- Purpose: LaunchDarkly React Client SDK demonstration
+- Port: 8000
+- Purpose: User interface with embedded JavaScript SDK demonstration
 
 **relay-proxy** (Relay Proxy Container):
 - LaunchDarkly Relay Proxy v8.16.4
 - AutoConfig mode
 - Event forwarding enabled
 - Redis integration for persistent storage
+- **Network Configuration**: Routes outbound traffic through squid-proxy for connection management
 - Port: 8030
 - Purpose: Feature flag caching and event forwarding
 
@@ -796,18 +950,60 @@ This application uses a microservices architecture with seven specialized contai
 - Volume: redis-data for persistent storage
 - Purpose: Shared data store for feature flags
 
+**squid-proxy** (HTTP Proxy Container):
+- Squid 6 Alpine
+- HTTP/HTTPS proxy server
+- Static IP assignment (172.18.0.80) for reliable routing
+- Port: 3128
+- Purpose: Network traffic control for relay-proxy connection management
+
+### Squid Proxy: Enabling Fast Connection Management
+
+The squid-proxy service is a critical infrastructure component that enables the **Relay Proxy Connection Toggle** feature to work efficiently. Here's how it works:
+
+**Why We Need It:**
+- The Relay Proxy maintains a long-lived streaming connection to LaunchDarkly
+- Without squid-proxy, disconnecting requires stopping the entire relay-proxy container (slow, disruptive)
+- With squid-proxy, we can control network traffic by stopping/starting the proxy container (fast, non-disruptive)
+
+**How It Works:**
+1. **Traffic Routing**: The relay-proxy container is configured to route all outbound HTTP/HTTPS traffic through squid-proxy using the `HTTP_PROXY` and `HTTPS_PROXY` environment variables
+2. **Static IP Assignment**: squid-proxy has a fixed IP address (172.18.0.80) on the Docker network for reliable routing
+3. **Container Control**: The api-service can stop/start the squid-proxy container to block/allow traffic to LaunchDarkly
+4. **Fast Disconnection**: When you click "Disconnect" in the dashboard, squid-proxy is stopped - no relay-proxy restart needed
+5. **Fast Reconnection**: When you click "Connect", squid-proxy is started and the relay-proxy reconnects on its next retry attempt (typically 3-60 seconds depending on backoff state)
+
+**Benefits:**
+- **Speed**: Connection control happens in seconds (container stop/start) vs. 10-30 seconds (relay-proxy restart)
+- **Reliability**: The relay-proxy container stays running, preserving its internal state and Redis connections
+- **Realism**: Simulates real-world network issues (proxy failures, network outages) rather than container failures
+- **Observability**: You can watch the relay-proxy logs in real-time as it detects the disconnection and attempts to reconnect
+
+**Network Flow:**
+```
+relay-proxy → squid-proxy (172.18.0.80:3128) → LaunchDarkly
+                    ↑
+              Container stop/start controls traffic here
+```
+
+When disconnected, the squid-proxy container is stopped, causing the relay-proxy's streaming connection to timeout naturally (30-120 seconds) while preserving internal Docker network connectivity to Redis.
+
 ### Port Mappings
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| Dashboard | 8000 | Web UI access (includes all service panels) |
-| API Service | 4000 | API endpoints for status and operations |
-| Node.js App | 3000 | Backend API only (no UI) |
-| Python App | 5000 | Backend API only (no UI) |
-| PHP App | 8080 | Backend API only (no UI) |
-| React App | 3001 | Internal only (UI embedded in dashboard) |
-| Relay Proxy | 8030 | LaunchDarkly Relay Proxy |
-| Redis | 6379 | Internal only (no external port) |
+All service ports are configurable via environment variables in the `.env` file, except for the fixed infrastructure ports (Relay Proxy and Redis).
+
+| Service | Default Port | Environment Variable | Purpose |
+|---------|--------------|---------------------|---------|
+| Dashboard | 8000 | `DASHBOARD_PORT` | Web UI access (includes all service panels) |
+| API Service | 4000 | `API_SERVICE_PORT` | API endpoints for status and operations |
+| Node.js App | 3000 | `NODE_SERVICE_PORT` | Backend API only (no UI) |
+| Python App | 5000 | `PYTHON_SERVICE_PORT` | Backend API only (no UI) |
+| PHP App | 8080 | `PHP_SERVICE_PORT` | Backend API only (no UI) |
+| Relay Proxy | 8030 | **FIXED** | LaunchDarkly Relay Proxy (cannot be changed) |
+| Redis | 6379 | **FIXED** | Internal only (cannot be changed) |
+| Squid Proxy | 3128 | `SQUID_PROXY_PORT` | HTTP proxy service |
+
+**Note**: The Relay Proxy and Redis ports are fixed and cannot be changed via environment variables. See the [Configurable Service Ports](#configurable-service-ports) section for details.
 
 ### Network
 
@@ -836,18 +1032,20 @@ This demo showcases SDK integration across four different languages, each demons
 - No direct LaunchDarkly API connections for flag evaluation
 - Backend API accessible at http://localhost:8080
 
-**React Application** (Proxy Mode - Client-Side):
-- Client-side SDK running in the browser
+**JavaScript Client** (Proxy Mode - Client-Side):
+- Client-side SDK running directly in the browser within the dashboard
 - All SDK traffic goes through the Relay Proxy
 - Receives real-time flag updates via streaming
 - Sends analytics events through the Relay Proxy
-- UI embedded in dashboard at http://localhost:8000
+- Runs as part of the dashboard at http://localhost:8000
 
 All applications:
 - Evaluate the same feature flags
 - Send analytics events to LaunchDarkly
 - Demonstrate how multiple SDKs in different languages work together
 - Display in a unified dashboard with dynamic panel switching
+
+The dashboard includes a JavaScript Client panel that demonstrates the LaunchDarkly JavaScript SDK running directly in the browser, communicating with the Relay Proxy for flag evaluation and event tracking.
 
 ### API Service Endpoints
 
@@ -890,42 +1088,50 @@ The relay proxy uses Redis as a persistent data store for caching feature flag c
          │
          ▼
 ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│  Node.js App    │      │  Python App     │      │  PHP App        │      │  React App      │
-│  (Relay Proxy   │      │  (Default Mode) │      │  (Daemon Mode)  │      │  (Proxy Mode    │
-│   Mode Only)    │      │  Direct Connect │      │  Redis + Events │      │   Client-Side)  │
-│  (Port 3000)    │      │  (Port 5000)    │      │  (Port 8080)    │      │  (Port 3001)    │
+│  Node.js App    │      │  Dashboard      │      │  PHP App        │      │  Python App     │
+│  (Relay Proxy   │      │  + JavaScript   │      │  (Daemon Mode)  │      │  (Default Mode) │
+│   Mode Only)    │      │  Client SDK     │      │  Redis + Events │      │  Direct Connect │
+│  (Port 3000)    │      │  (Port 8000)    │      │  (Port 8080)    │      │  (Port 5000)    │
 └────────┬────────┘      └────────┬────────┘      └────────┬────────┘      └────────┬────────┘
          │                        │                        │                        │
-         │ All SDK Traffic        │ Direct                 │ Direct Read            │ All SDK Traffic
-         ▼                        │ Connection             ▼                        ▼
-┌─────────────────┐               │               ┌─────────────────┐      ┌─────────────────┐
-│  Relay Proxy    │───────────────┘               │  Redis          │      │  Relay Proxy    │
-│  (Port 8030)    │─────────────────────────────►│  (Port 6379)    │◄─────│  (Port 8030)    │
-└────────┬────────┘                               └─────────────────┘      └────────┬────────┘
-         │                                                 │                        │
-         │ Events                                          │ Events                 │ Events
-         └─────────────────────────────────────────────────┴────────────────────────┘
-                  │
-                  ▼
-         ┌─────────────────┐
-         │  LaunchDarkly   │
-         │  Cloud Service  │
-         └─────────────────┘
+         │ All SDK Traffic        │ Browser SDK            │ Direct Read            │ Direct
+         ▼                        │ Traffic                ▼                        │ Connection
+┌─────────────────┐               │               ┌─────────────────┐               │
+│  Relay Proxy    │◄──────────────┘               │  Redis          │               │
+│  (Port 8030)    │─────────────────────────────►│  (Port 6379)    │               │
+└────────┬────────┘                               └─────────────────┘               │
+         │                                                                           │
+         │ Outbound Traffic                                                          │
+         ▼                                                                           │
+┌─────────────────┐                                                                  │
+│  Squid Proxy    │                                                                  │
+│  (Port 3128)    │                                                                  │
+│  172.18.0.80    │                                                                  │
+└────────┬────────┘                                                                  │
+         │                                                                           │
+         │ Container stop/start controlled                                           │
+         ▼                                                                           ▼
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│                           LaunchDarkly Cloud Service                                 │
+└──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Key Architecture Points:**
-- **Dashboard**: Serves static UI, fetches data from API service
+- **Dashboard**: Serves static UI with embedded JavaScript Client SDK, fetches data from API service
 - **API Service**: Centralized gateway for status checks and operations
 - **Node.js**: Single path through Relay Proxy (streaming + events)
 - **Python**: Direct connection to LaunchDarkly (streaming + events)
 - **PHP**: Direct Redis reads for flags, Relay Proxy for events only
-- **React**: Client-side SDK through Relay Proxy (streaming + events)
+- **JavaScript Client**: Browser-based SDK through Relay Proxy (streaming + events)
+- **Squid Proxy**: HTTP proxy for relay-proxy traffic control (enables connection toggle feature)
 - **Simplified Configuration**: No mode switching logic in any application
 - **Optimized Performance**: Each application uses its ideal integration pattern
 
 **Benefits of This Architecture:**
 
 **Data Persistence**: Feature flag data persists across container restarts, reducing initialization time and API calls to LaunchDarkly.
+
+**Network Control**: The squid-proxy enables fast, non-disruptive connection management for the relay-proxy. By routing relay-proxy's outbound traffic through squid-proxy (static IP 172.18.0.80), we can stop/start the squid-proxy container to simulate network disconnections without restarting the relay-proxy. This allows realistic testing of offline behavior and reconnection logic.
 
 **Persistence Mechanism**: Redis uses AOF (Append-Only File) persistence, which logs every write operation to disk. The data is stored in a Docker volume (`redis-data`) that survives container removal and recreation.
 
@@ -1064,10 +1270,10 @@ When monitoring Docker events or logs, you may observe:
 - These are lightweight operations that don't impact performance
 
 **Temporary Alpine Containers**:
-- Short-lived Alpine containers may appear during disconnect/reconnect operations
-- These are created by iptables commands to manipulate network rules
+- Short-lived Alpine containers may appear during Docker operations
+- These are created by Docker commands for various management tasks
 - They are automatically removed after completing their task
-- This is expected behavior for the relay proxy connection toggle feature
+- This is expected behavior for container management operations
 
 ### Viewing Health Status
 
@@ -1272,7 +1478,7 @@ docker exec redis redis-cli KEYS "*"
 
 ### Configuration Comparison
 
-| Feature | Node.js (Proxy Mode) | Python (Default Mode) | PHP (Daemon Mode) | React (Proxy Mode - Client-Side) |
+| Feature | Node.js (Proxy Mode) | Python (Default Mode) | PHP (Daemon Mode) | JavaScript Client (Proxy Mode) |
 |---------|---------------------------|----------------------|-------------------|----------------------------------|
 | Flag Source | Relay Proxy | LaunchDarkly Direct | Redis Direct | Relay Proxy |
 | Real-time Updates | Yes (streaming) | Yes (streaming) | Yes (polling every 5s) | Yes (streaming) |
@@ -1467,15 +1673,21 @@ curl -X POST http://localhost:8080/api/test-evaluation \
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `LAUNCHDARKLY_SDK_KEY` | Yes | - | Your LaunchDarkly SDK key |
-| `LAUNCHDARKLY_CLIENT_SIDE_ID` | Yes | - | Your LaunchDarkly client-side ID (for dashboard JavaScript SDK and React app) |
+| `LAUNCHDARKLY_CLIENT_SIDE_ID` | Yes | - | Your LaunchDarkly client-side ID (for dashboard JavaScript SDK) |
 | `RELAY_PROXY_CONFIG_KEY` | Yes | - | Relay Proxy configuration key |
-| `PORT` | No | 3000 | Port for the Express server |
+| `DASHBOARD_PORT` | No | 8000 | External port for dashboard web UI |
+| `API_SERVICE_PORT` | No | 4000 | External port for API service |
+| `NODE_SERVICE_PORT` | No | 3000 | External port for Node.js service |
+| `PHP_SERVICE_PORT` | No | 8080 | External port for PHP service |
+| `PYTHON_SERVICE_PORT` | No | 5000 | External port for Python service |
+| `SQUID_PROXY_PORT` | No | 3128 | External port for Squid proxy |
+| `PORT` | No | 3000 | Port for the Express server (set via NODE_SERVICE_PORT) |
 | `RELAY_PROXY_URL` | No | http://relay-proxy:8030 | URL of the Relay Proxy |
 | `REDIS_HOST` | No | redis | Redis hostname (PHP only) |
-| `REDIS_PORT` | No | 6379 | Redis port (PHP only) |
+| `REDIS_PORT` | No | 6379 | Redis port (PHP only, fixed at 6379) |
 | `REDIS_PREFIX` | No | - | Redis key prefix (PHP only, must match Relay Proxy environment ID / Client-side ID) |
-| `REACT_PORT` | No | 3001 | Port for the React application |
-| `REACT_API_PORT` | No | 3002 | Port for the React API server (internal) |
+
+**Note**: The Relay Proxy (8030) and Redis (6379) ports are fixed and cannot be changed via environment variables. See the [Configurable Service Ports](#configurable-service-ports) section for details.
 
 ### Obtaining LaunchDarkly Credentials
 
@@ -1531,19 +1743,13 @@ launchdarkly-relay-proxy-enterprise-demo/
 │   ├── nginx.conf       # Nginx configuration
 │   ├── supervisord.conf # Process manager config
 │   └── www.conf         # PHP-FPM pool config
-└── react-app/           # React application
-    ├── Dockerfile       # React Docker image (multi-stage)
-    ├── package.json     # React dependencies
-    ├── nginx.conf       # Nginx configuration
-    ├── docker-entrypoint.sh  # Container startup script
-    ├── public/          # React public assets
-    └── src/             # React source code
-        ├── components/  # React components
-        ├── contexts/    # React context providers
-        ├── utils/       # Utility functions
-        ├── App.jsx      # Main application component
-        ├── index.jsx    # Entry point with LD provider
-        └── api-server.js  # Express API server
+├── python/              # Python application
+│   ├── Dockerfile       # Python Docker image
+│   ├── app.py           # Flask application
+│   └── requirements.txt # Python dependencies
+└── squid-proxy/         # Squid proxy for relay-proxy connection control
+    ├── Dockerfile       # Squid Docker image
+    └── squid.conf       # Squid configuration
 ```
 
 ## Troubleshooting
@@ -2083,7 +2289,6 @@ MIT License - See LICENSE file for details
 - **LaunchDarkly Docs**: https://docs.launchdarkly.com
 - **Node.js Server SDK**: https://docs.launchdarkly.com/sdk/server-side/node-js
 - **JavaScript Client SDK**: https://docs.launchdarkly.com/sdk/client-side/javascript
-- **React Client SDK**: https://docs.launchdarkly.com/sdk/client-side/react
 - **PHP SDK**: https://docs.launchdarkly.com/sdk/server-side/php
 - **Python SDK**: https://docs.launchdarkly.com/sdk/server-side/python
 - **Relay Proxy**: https://docs.launchdarkly.com/home/relay-proxy

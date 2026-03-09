@@ -1,13 +1,14 @@
 # LaunchDarkly Relay Proxy Enterprise Demo - Docker Compose Configuration
 #
-# This configuration defines a 7-container microservices architecture:
-# 1. dashboard - Static web UI (Nginx)
+# This configuration defines an 8-container microservices architecture:
+# 1. dashboard - Static web UI with embedded JavaScript Client SDK (Nginx)
 # 2. api-service - API gateway for status checks and operations
 # 3. app (node-app-dev) - Node.js SDK demonstration
 # 4. relay-proxy - LaunchDarkly Relay Proxy
 # 5. redis - Persistent data store
 # 6. php (php-app-dev) - PHP SDK demonstration
 # 7. python (python-app-dev) - Python SDK demonstration
+# 8. squid-proxy - HTTP proxy for relay-proxy connection management
 
 services:
   # ============================================================================
@@ -23,11 +24,23 @@ services:
       context: .
       dockerfile: dashboard/Dockerfile
     ports:
-      - "8000:8000"  # External:Internal - Web UI access
+      - "${DASHBOARD_PORT:-8000}:8000"  # External:Internal - Web UI access
     # Environment Variables:
     # - LAUNCHDARKLY_CLIENT_SIDE_ID: Client-side ID for JavaScript SDK
+    # - DASHBOARD_PORT: Dashboard port for template substitution
+    # - API_SERVICE_PORT: API service port for template substitution
+    # - NODE_SERVICE_PORT: Node service port for template substitution
+    # - PHP_SERVICE_PORT: PHP service port for template substitution
+    # - PYTHON_SERVICE_PORT: Python service port for template substitution
+    # - SQUID_PROXY_PORT: Squid proxy port for template substitution
     environment:
       - LAUNCHDARKLY_CLIENT_SIDE_ID=${LAUNCHDARKLY_CLIENT_SIDE_ID}
+      - DASHBOARD_PORT=${DASHBOARD_PORT:-8000}
+      - API_SERVICE_PORT=${API_SERVICE_PORT:-4000}
+      - NODE_SERVICE_PORT=${NODE_SERVICE_PORT:-3000}
+      - PHP_SERVICE_PORT=${PHP_SERVICE_PORT:-8080}
+      - PYTHON_SERVICE_PORT=${PYTHON_SERVICE_PORT:-5000}
+      - SQUID_PROXY_PORT=${SQUID_PROXY_PORT:-3128}
     networks:
       launchdarkly-network:
         ipv4_address: 172.18.0.10
@@ -55,7 +68,7 @@ services:
       context: ./api-service
       dockerfile: Dockerfile
     ports:
-      - "4000:4000"  # External:Internal - API endpoints
+      - "${API_SERVICE_PORT:-4000}:4000"  # External:Internal - API endpoints
     # Environment Variables:
     # - PORT: HTTP server port (default: 4000)
     # - RELAY_PROXY_URL: URL for relay proxy status checks
@@ -63,25 +76,19 @@ services:
     # - PHP_APP_URL: URL for PHP app status checks
     # - PYTHON_APP_URL: URL for Python app status checks
     environment:
-      - PORT=4000
+      - PORT=${API_SERVICE_PORT:-4000}
       - RELAY_PROXY_URL=http://relay-proxy:8030
-      - NODE_APP_URL=http://node-app-dev:3000
+      - NODE_APP_URL=http://node-app-dev:${NODE_SERVICE_PORT:-3000}
       - PHP_APP_URL=http://php-app-dev:80
-      - PYTHON_APP_URL=http://python-app-dev:5000
+      - PYTHON_APP_URL=http://python-app-dev:${PYTHON_SERVICE_PORT:-5000}
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
     # Volume Mounts:
-    # - Docker socket: Required for executing Docker commands (logs, stats)
-    #   Mounted read-write to allow container inspection and log retrieval
+    # - Docker socket: Required for executing Docker commands (logs, stats, container control)
+    #   Mounted read-write to allow container inspection and control
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    # User: root required to access Docker socket and iptables
+    # User: root required to access Docker socket
     user: root
-    # Network capabilities: Required for iptables manipulation
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    # Privileged mode: Required for iptables access to host network
-    privileged: true
     networks:
       launchdarkly-network:
         ipv4_address: 172.18.0.20
@@ -109,18 +116,20 @@ services:
   app:
     container_name: node-app-dev
     build:
-      context: .
+      context: ./node-service
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"  # External:Internal - SDK demonstration endpoints
+      - "${NODE_SERVICE_PORT:-3000}:3000"  # External:Internal - SDK demonstration endpoints
     # Environment Variables:
     # - PORT: HTTP server port (default: 3000)
     # - LAUNCHDARKLY_SDK_KEY: LaunchDarkly SDK key (from .env file)
     # - RELAY_PROXY_URL: URL for SDK to connect to relay proxy
+    # - DASHBOARD_PORT: Dashboard port for CORS configuration
     environment:
-      - PORT=3000
+      - PORT=${NODE_SERVICE_PORT:-3000}
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
       - RELAY_PROXY_URL=http://relay-proxy:8030
+      - DASHBOARD_PORT=${DASHBOARD_PORT:-8000}
     # Volume Mounts:
     # - Docker socket: Required for log retrieval operations
     #   Note: This is legacy from when app served dashboard; may be removed in future
@@ -163,15 +172,22 @@ services:
       - USE_REDIS=1
       - REDIS_URL=redis://redis:6379
       - ENV_DATASTORE_PREFIX=ld-flags-$$CID
-      - CORS_ALLOW_ORIGIN=http://localhost:3000
+      - CORS_ALLOW_ORIGIN=http://localhost:${NODE_SERVICE_PORT:-3000}
+      - HTTP_PROXY=http://172.18.0.80:3128
+      - HTTPS_PROXY=http://172.18.0.80:3128
+      - NO_PROXY=redis,172.18.0.50,localhost,127.0.0.1
     networks:
       launchdarkly-network:
         ipv4_address: 172.18.0.40
     # Service Dependencies:
     # - redis: Relay proxy requires Redis for persistent flag storage
     #   Waits for Redis to be healthy before starting (condition: service_healthy)
+    # - squid-proxy: Relay proxy routes internet traffic through Squid proxy
+    #   Waits for squid-proxy to be healthy before starting (condition: service_healthy)
     depends_on:
       redis:
+        condition: service_healthy
+      squid-proxy:
         condition: service_healthy
 
   # ============================================================================
@@ -220,19 +236,21 @@ services:
       context: ./php
       dockerfile: Dockerfile
     ports:
-      - "8080:80"  # External:Internal - PHP application (Nginx on port 80)
+      - "${PHP_SERVICE_PORT:-8080}:80"  # External:Internal - PHP application (Nginx on port 80)
     # Environment Variables:
     # - LAUNCHDARKLY_SDK_KEY: LaunchDarkly SDK key (from .env file)
     # - REDIS_HOST: Redis hostname for daemon mode
     # - REDIS_PORT: Redis port for daemon mode
     # - REDIS_PREFIX: Redis key prefix (must match relay proxy environment ID)
     # - RELAY_PROXY_URL: URL for sending analytics events
+    # - DASHBOARD_PORT: Dashboard port for CORS configuration
     environment:
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PREFIX=${REDIS_PREFIX:-}
       - RELAY_PROXY_URL=http://relay-proxy:8030
+      - DASHBOARD_PORT=${DASHBOARD_PORT:-8000}
     networks:
       launchdarkly-network:
         ipv4_address: 172.18.0.60
@@ -256,13 +274,17 @@ services:
       context: ./python
       dockerfile: Dockerfile
     ports:
-      - "5000:5000"  # External:Internal - Python application endpoints
+      - "${PYTHON_SERVICE_PORT:-5000}:5000"  # External:Internal - Python application endpoints
     # Environment Variables:
     # - LAUNCHDARKLY_SDK_KEY: LaunchDarkly SDK key (from .env file)
     # - PORT: HTTP server port (default: 5000)
+    # - DASHBOARD_PORT: Dashboard port for CORS configuration
+    # - NODE_SERVICE_PORT: Node service port for CORS configuration
     environment:
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
-      - PORT=5000
+      - PORT=${PYTHON_SERVICE_PORT:-5000}
+      - DASHBOARD_PORT=${DASHBOARD_PORT:-8000}
+      - NODE_SERVICE_PORT=${NODE_SERVICE_PORT:-3000}
     networks:
       launchdarkly-network:
         ipv4_address: 172.18.0.70
@@ -271,6 +293,32 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ============================================================================
+  # Squid Proxy Service
+  # ============================================================================
+  # Purpose: HTTP/HTTPS proxy for relay proxy internet traffic control
+  # Technology: Squid proxy server
+  # Port: 3128
+  # Dependencies: None
+  # Health Check: Netcat connection test on port 3128
+  squid-proxy:
+    container_name: squid-proxy
+    build:
+      context: ./squid-proxy
+      dockerfile: Dockerfile
+    ports:
+      - "${SQUID_PROXY_PORT:-3128}:3128"  # External:Internal - HTTP proxy port
+    networks:
+      launchdarkly-network:
+        ipv4_address: 172.18.0.80
+    # Health Check: Verifies proxy is accepting connections
+    # Runs every 5 seconds, times out after 3 seconds, retries 3 times
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "3128"]
+      interval: 5s
       timeout: 3s
       retries: 3
 

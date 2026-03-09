@@ -50,11 +50,12 @@ const lastFlagValues = new Map();
 function createApp() {
   const app = express();
 
-  // Enable CORS for all routes to allow dashboard at port 8000
+  // Enable CORS for all routes to allow dashboard
   app.use((req, res, next) => {
+    const dashboardPort = process.env.DASHBOARD_PORT || '8000';
     const origin = req.headers.origin;
-    // Allow requests from dashboard (port 8000) and localhost variations
-    if (origin && (origin.includes('localhost:8000') || origin.includes('127.0.0.1:8000'))) {
+    // Allow requests from dashboard and localhost variations
+    if (origin && (origin.includes(`localhost:${dashboardPort}`) || origin.includes(`127.0.0.1:${dashboardPort}`))) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     } else {
