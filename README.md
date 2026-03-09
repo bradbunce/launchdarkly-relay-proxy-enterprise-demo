@@ -79,7 +79,9 @@ This demo requires **three feature flags** to be created in your LaunchDarkly pr
    - "Hello from LaunchDarkly!"
    - "Welcome to the demo!"
    - "Greetings from the Relay Proxy!"
-4. Turn the flag **ON** and set a default variation
+4. Configure the flag (choose one approach):
+   - **Option A**: Turn the flag ON and set a default variation
+   - **Option B**: Leave the flag OFF and configure targeting rules to serve specific variations
 
 **Purpose**: Primary demo flag that displays different messages to users. Used to demonstrate flag evaluation, targeting rules, and real-time updates across both Node.js and PHP applications.
 
@@ -89,7 +91,9 @@ This demo requires **three feature flags** to be created in your LaunchDarkly pr
 3. Two variations:
    - `true` (open terminal panels in separate window)
    - `false` (close terminal panels window)
-4. Turn the flag **ON** and set default to `true`
+4. Configure the flag (choose one approach):
+   - **Option A**: Turn the flag ON and set default to `true`
+   - **Option B**: Leave the flag OFF and configure targeting rules to serve `true` or `false`
 
 **Purpose**: Controls whether terminal log panels open in a separate browser window. When set to `true`, a popup window displays real-time container logs for all services. When set to `false`, the terminal window closes automatically. Demonstrates real-time UI control and window management via feature flags.
 
@@ -100,7 +104,9 @@ This demo requires **three feature flags** to be created in your LaunchDarkly pr
    - `nodejs` (show Node.js panel)
    - `python` (show Python panel)
    - `javascript` (show JavaScript Client panel)
-4. Turn the flag **ON** and set default to `nodejs`
+4. Configure the flag (choose one approach):
+   - **Option A**: Turn the flag ON and set default to `nodejs`
+   - **Option B**: Leave the flag OFF and configure targeting rules to serve `nodejs`, `python`, or `javascript`
 
 **Purpose**: Controls which service is displayed in Panel 1 of the dashboard. Demonstrates dynamic UI panel switching via feature flags. Changes apply instantly without page refresh, and the terminal panels window automatically synchronizes to match the selected service.
 
@@ -2126,7 +2132,7 @@ This demo application requires **three feature flags** to be created in your Lau
 
 **Flag Key**: `user-message`
 **Type**: String (multi-variate)
-**Status**: Must be turned ON
+**Status**: Can be ON (serves default variation) or OFF with targeting rules (serves targeted variations)
 
 **Variations**:
 1. "Hello from LaunchDarkly!"
@@ -2168,7 +2174,7 @@ If user.anonymous is true
 
 **Flag Key**: `terminal-panels`
 **Type**: Boolean
-**Status**: Must be turned ON
+**Status**: Can be ON (serves default variation) or OFF with targeting rules (serves targeted variations)
 **Default Value**: `true` (recommended)
 
 **Variations**:
@@ -2224,7 +2230,7 @@ The terminal panels window will always attempt to open (fallback to `true`), and
 
 **Flag Key**: `dashboard-service-panel-1`
 **Type**: String
-**Status**: Must be turned ON
+**Status**: Can be ON (serves default variation) or OFF with targeting rules (serves targeted variations)
 **Default Value**: `nodejs` (recommended)
 
 **Variations**:
@@ -2276,21 +2282,18 @@ The dashboard will default to showing the Node.js panel (fallback to `nodejs`), 
    - Select type: **String**
    - Click **"Create flag"**
    - Add the three variations listed above
-   - Turn the flag **ON**
-   - Set a default variation
+   - Configure the flag: Turn it ON with a default variation, OR leave it OFF and set up targeting rules
 5. For `terminal-panels`:
    - Enter key: `terminal-panels`
    - Select type: **Boolean**
    - Click **"Create flag"**
-   - Turn the flag **ON**
-   - Set default to `true`
+   - Configure the flag: Turn it ON with default `true`, OR leave it OFF and set up targeting rules
 6. For `dashboard-service-panel-1`:
    - Enter key: `dashboard-service-panel-1`
    - Select type: **String**
    - Click **"Create flag"**
    - Add three variations: `nodejs`, `python`, `javascript`
-   - Turn the flag **ON**
-   - Set default to `nodejs`
+   - Configure the flag: Turn it ON with default `nodejs`, OR leave it OFF and set up targeting rules
 
 **Important**: All three flags must be created in the same LaunchDarkly project and environment that your SDK key and Relay Proxy configuration key are associated with.
 
