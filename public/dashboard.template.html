@@ -3737,10 +3737,31 @@
           
           console.log('[JavaScript Client] Browser console logger initialized');
           
+          // Listen for SDK ready event (initial connection and reconnections)
+          window.jsClientSDK.on('ready', () => {
+            console.log('[JavaScript Client] SDK ready - connection established');
+            updatePillStatus('javascript', 'connected');
+            
+            // Clear offline mode flag when SDK reconnects
+            if (window.jsClientOfflineMode) {
+              console.log('[JavaScript Client] Reconnected - clearing offline mode');
+              window.jsClientOfflineMode = false;
+            }
+            
+            // Re-evaluate flags with current context
+            updateJavaScriptClientPanel(true);
+          });
+          
           // Listen for SDK flag changes
           window.jsClientSDK.on('change', () => {
             console.log('[JavaScript Client] SDK flag changed');
-            updateJavaScriptClientPanel();
+            
+            // Clear offline mode on successful flag change (means we're connected)
+            if (window.jsClientOfflineMode) {
+              window.jsClientOfflineMode = false;
+            }
+            
+            updateJavaScriptClientPanel(true);
           });
           
           // Listen for SDK errors
