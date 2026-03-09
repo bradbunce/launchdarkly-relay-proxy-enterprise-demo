@@ -32,9 +32,10 @@ A comprehensive demonstration application showcasing the LaunchDarkly Node.js se
 - **Docker**: Version 20.10 or higher
 - **Docker Compose**: Version 2.0 or higher
 - **LaunchDarkly Account**: With SDK key and Relay Proxy configuration key
-- **Required Feature Flags**: Two flags must be created in your LaunchDarkly project:
+- **Required Feature Flags**: Three flags must be created in your LaunchDarkly project:
   - `user-message` (string, multi-variate)
   - `terminal-panels` (boolean)
+  - `dashboard-service-panel-1` (string)
   
   See the [Required Feature Flags](#required-feature-flags) section below for detailed setup instructions.
 
@@ -69,7 +70,7 @@ REDIS_PREFIX=ld-flags-'your-environment-id'
 
 ### 2. Create Required Feature Flags
 
-This demo requires **two feature flags** to be created in your LaunchDarkly project:
+This demo requires **three feature flags** to be created in your LaunchDarkly project:
 
 #### Flag 1: user-message (Required)
 1. Create a new flag with key: `user-message`
@@ -92,7 +93,18 @@ This demo requires **two feature flags** to be created in your LaunchDarkly proj
 
 **Purpose**: Controls whether terminal log panels open in a separate browser window. When set to `true`, a popup window displays real-time container logs for all services. When set to `false`, the terminal window closes automatically. Demonstrates real-time UI control and window management via feature flags.
 
-**Important**: Both flags must exist in your LaunchDarkly project for the demo to function correctly. The application will show fallback values if these flags are missing.
+#### Flag 3: dashboard-service-panel-1 (Required)
+1. Create a new flag with key: `dashboard-service-panel-1`
+2. Set it as a **string flag**
+3. Three variations:
+   - `nodejs` (show Node.js panel)
+   - `python` (show Python panel)
+   - `javascript` (show JavaScript Client panel)
+4. Turn the flag **ON** and set default to `nodejs`
+
+**Purpose**: Controls which service is displayed in Panel 1 of the dashboard. Demonstrates dynamic UI panel switching via feature flags. Changes apply instantly without page refresh, and the terminal panels window automatically synchronizes to match the selected service.
+
+**Important**: All three flags must exist in your LaunchDarkly project for the demo to function correctly. The application will show fallback values if these flags are missing.
 
 ### 3. Run with Docker Compose
 
@@ -2108,7 +2120,7 @@ docker-compose restart redis php
 
 ## Required Feature Flags
 
-This demo application requires **two feature flags** to be created in your LaunchDarkly project. Both flags must exist for the demo to work correctly.
+This demo application requires **three feature flags** to be created in your LaunchDarkly project. All flags must exist for the demo to work correctly.
 
 ### Flag 1: user-message (Required)
 
@@ -2208,6 +2220,52 @@ Controls whether terminal log panels open in a separate browser window. This fla
 **What Happens Without This Flag**:
 The terminal panels window will always attempt to open (fallback to `true`), and you won't be able to demonstrate dynamic window control.
 
+### Flag 3: dashboard-service-panel-1 (Required)
+
+**Flag Key**: `dashboard-service-panel-1`
+**Type**: String
+**Status**: Must be turned ON
+**Default Value**: `nodejs` (recommended)
+
+**Variations**:
+- `nodejs`: Display Node.js service panel in Panel 1
+- `python`: Display Python service panel in Panel 1
+- `javascript`: Display JavaScript Client panel in Panel 1
+
+**Purpose**: 
+Controls which service is displayed in Panel 1 of the dashboard. This flag demonstrates:
+- Dynamic UI panel switching via feature flags
+- Real-time content updates without page refresh
+- String flag evaluation with multiple service options
+- Cross-window synchronization (terminal panels follow Panel 1 selection)
+
+**Behavior**:
+- **Dynamic Panel Switching**: Panel 1 content changes instantly when flag value changes
+- **Service Selection**: Choose between Node.js, Python, or JavaScript Client SDK demonstrations
+- **Real-time Updates**: Changes apply instantly via SSE without browser refresh
+- **Terminal Synchronization**: Terminal panels window automatically switches Panel 1 to match
+- **Context**: Evaluated with container context (key: 'dashboard-v2')
+
+**Panel Features by Service**:
+- **Node.js**: Server-side SDK via Relay Proxy, streaming updates, load testing
+- **Python**: Server-side SDK direct to LaunchDarkly, streaming updates, independent connection
+- **JavaScript Client**: Client-side SDK in browser via Relay Proxy, browser console logs
+
+**Use Cases**:
+- Demonstrate different SDK integration patterns in a single dashboard
+- Switch between server-side and client-side SDK demonstrations
+- Show how feature flags can control UI layout and content
+- Compare behavior across different SDK implementations
+
+**Technical Details**:
+- Uses CSS display properties to show/hide panels
+- SSE connections managed per service (Node.js and Python have separate streams)
+- JavaScript Client runs directly in browser, no SSE needed
+- Terminal panels window listens for flag changes to synchronize Panel 1
+
+**What Happens Without This Flag**:
+The dashboard will default to showing the Node.js panel (fallback to `nodejs`), and you won't be able to demonstrate dynamic panel switching.
+
 ### Creating the Flags in LaunchDarkly
 
 1. Log in to https://app.launchdarkly.com
@@ -2226,8 +2284,15 @@ The terminal panels window will always attempt to open (fallback to `true`), and
    - Click **"Create flag"**
    - Turn the flag **ON**
    - Set default to `true`
+6. For `dashboard-service-panel-1`:
+   - Enter key: `dashboard-service-panel-1`
+   - Select type: **String**
+   - Click **"Create flag"**
+   - Add three variations: `nodejs`, `python`, `javascript`
+   - Turn the flag **ON**
+   - Set default to `nodejs`
 
-**Important**: Both flags must be created in the same LaunchDarkly project and environment that your SDK key and Relay Proxy configuration key are associated with.
+**Important**: All three flags must be created in the same LaunchDarkly project and environment that your SDK key and Relay Proxy configuration key are associated with.
 
 ## Best Practices
 
