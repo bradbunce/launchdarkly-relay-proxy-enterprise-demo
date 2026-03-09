@@ -733,8 +733,9 @@ function createApp() {
   }
 
   // Hash calculation endpoint for JavaScript Client (client-side SDK)
-  // This fetches flag configuration from the Relay Proxy's client-side endpoint
-  // to get the correct salt value for client-side flag evaluations
+  // Note: Client-side and server-side SDKs should have the same flag salt
+  // Calculate hash for client-side SDK contexts
+  // This endpoint helps display the bucketing hash calculation for educational purposes
   app.post('/api/calculate-hash-client-side', express.json(), async (req, res) => {
     try {
       console.log('[Client-Side Hash] Request body:', req.body);
@@ -751,88 +752,71 @@ function createApp() {
         });
       }
       
-      // Fetch flag data from Relay Proxy's client-side SDK endpoint
-      const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
+      const ldClient = getLaunchDarklyClient();
       
-      // The Relay Proxy client-side endpoint format is:
-      // /sdk/evalx/{envId}/contexts/{base64EncodedContext}
-      // We need to create a proper context object and base64 encode it
-      const contextObj = {
-        kind: 'user',
-        key: contextKey
-      };
-      
-      const contextBase64 = Buffer.from(JSON.stringify(contextObj)).toString('base64');
-      const flagDataUrl = `${relayProxyUrl}/sdk/evalx/${clientSideId}/contexts/${contextBase64}`;
-      
-      console.log('[Client-Side Hash] Fetching from URL:', flagDataUrl);
-      
-      try {
-        const response = await fetch(flagDataUrl);
-        
-        console.log('[Client-Side Hash] Relay Proxy response status:', response.status);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('[Client-Side Hash] Relay Proxy error:', errorText);
-          return res.status(response.status).json({ 
-            error: `Failed to fetch flag data from Relay Proxy: ${response.statusText}`,
-            details: errorText
-          });
-        }
-        
-        const flagData = await response.json();
-        
-        console.log('[Client-Side Hash] Flag data keys:', Object.keys(flagData));
-        
-        // Find the specific flag in the response
-        const flagConfig = flagData[flagKey];
-        
-        if (!flagConfig) {
-          console.error('[Client-Side Hash] Flag not found in response');
-          return res.status(404).json({ 
-            error: `Flag '${flagKey}' not found in client-side flag data`,
-            availableFlags: Object.keys(flagData)
-          });
-        }
-        
-        console.log('[Client-Side Hash] Flag config:', flagConfig);
-        
-        // Extract salt from flag configuration
-        // Client-side flag data structure might have salt in different location
-        const salt = flagConfig.salt || flagConfig.trackEvents?.salt || flagKey;
-        
-        console.log('[Client-Side Hash] Using salt:', salt);
-        
-        // Calculate hash value using HashValueExposer
-        const hashResult = hashExposer.expose({
-          flagKey,
-          contextKey,
-          salt
-        });
-        
-        if (hashResult.error) {
-          return res.status(500).json({ 
-            error: 'Failed to calculate hash',
-            details: hashResult.error 
-          });
-        }
-        
-        res.json({
-          success: true,
-          hashInfo: {
-            hashValue: hashResult.hashValue,
-            bucketValue: hashResult.bucketValue,
-            salt: hashResult.salt
-          }
-        });
-      } catch (fetchError) {
-        console.error('[Client-Side Hash Calculation] Fetch error:', fetchError);
+      if (!ldClient) {
         return res.status(503).json({ 
-          error: 'Failed to connect to Relay Proxy',
-          details: fetchError.message 
+          error: 'LaunchDarkly client not initialized' 
         });
       }
+      
+      // Get the flag configuration from the inspectable store
+      // The server-side SDK should have the same flag salt as client-side
+      let salt = flagKey; // Default fallback
+      
+      try {
+        const store = getInspectableStore();
+        
+        if (store) {
+          const storeData = store.inspect();
+          const flagConfig = storeData.features?.[flagKey];
+          
+          console.log('[Client-Side Hash] Flag config from store:', flagConfig ? 'found' : 'not found');
+          
+          if (flagConfig) {
+            console.log('[Client-Side Hash] Flag config keys:', Object.keys(flagConfig));
+            console.log('[Client-Side Hash] Flag config salt:', flagConfig.salt);
+            
+            if (flagConfig.salt) {
+              salt = flagConfig.salt;
+              console.log('[Client-Side Hash] Found salt from SDK store:', salt);
+            } else {
+              console.warn(`[Client-Side Hash] Flag '${flagKey}' has no salt property, using flagKey as salt`);
+            }
+          } else {
+            console.warn(`[Client-Side Hash] Flag '${flagKey}' not found in store, using flagKey as salt`);
+          }
+        } else {
+          console.warn('[Client-Side Hash] Inspectable store not available, using flagKey as salt');
+        }
+      } catch (storeError) {
+        console.warn('[Client-Side Hash] Error accessing store:', storeError.message);
+      }
+      
+      console.log('[Client-Side Hash] Using salt:', salt);
+        
+      // Calculate hash value using HashValueExposer
+      const hashResult = hashExposer.expose({
+        flagKey,
+        contextKey,
+        salt
+      });
+      
+      if (hashResult.error) {
+        return res.status(500).json({ 
+          error: 'Failed to calculate hash',
+          details: hashResult.error 
+        });
+      }
+      
+      res.json({
+        success: true,
+        hashInfo: {
+          hashValue: hashResult.hashValue,
+          bucketValue: hashResult.bucketValue,
+          salt: hashResult.salt
+        }
+      });
     } catch (error) {
       console.error('[Client-Side Hash Calculation] Error:', error);
       res.status(500).json({ 
