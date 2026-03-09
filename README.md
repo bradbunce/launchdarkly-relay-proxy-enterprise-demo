@@ -195,7 +195,7 @@ All user-facing services can be configured to use custom ports through the `.env
 - **Relay Proxy** (8030) - Required by LaunchDarkly architecture
 - **Redis** (6379) - Required by LaunchDarkly Relay Proxy and PHP SDK
 
-**Note**: The squid-proxy service is essential for the Relay Proxy Connection Toggle feature. It enables fast, non-disruptive network disconnection testing by routing relay-proxy traffic through a controllable proxy. See the [Architecture](#squid-proxy-enabling-fast-connection-management) section for details.
+**Note**: The squid-proxy service is essential for the Relay Proxy Connection Toggle feature. It enables **fast, near-instant network disconnection testing** by routing relay-proxy traffic through a controllable proxy. Connection state changes happen in seconds, not minutes. See the [Architecture](#squid-proxy-enabling-fast-connection-management) section for details.
 
 ### Customizing Ports
 
@@ -347,19 +347,20 @@ The demo application provides:
 
 ### Relay Proxy Connection Toggle
 
-The dashboard includes a connection toggle that allows you to simulate network disconnection scenarios between the Relay Proxy and LaunchDarkly without stopping the container. This feature is useful for testing how your application behaves when flag updates are unavailable.
+The dashboard includes a connection toggle that allows you to simulate network disconnection scenarios between the Relay Proxy and LaunchDarkly without stopping the container. This feature provides **fast, near-instant connection state changes** for efficient testing.
 
 **What It Does:**
 - **Disconnect**: Stops the squid-proxy container to block outbound network traffic from the Relay Proxy to LaunchDarkly
 - **Reconnect**: Starts the squid-proxy container to restore connectivity
 - **Status Display**: Shows current connection state (Connected/Disconnected/Container Stopped)
+- **Fast State Changes**: Connection state changes happen in seconds, not minutes
 
 **How to Use:**
 1. Open the dashboard at http://localhost:8000
 2. Locate the "Relay Proxy" panel
 3. Find the "Connection to LaunchDarkly" toggle switch
 4. Click the toggle to disconnect or reconnect
-5. Observe the status text change (Connected → Disconnected)
+5. Observe the status text change quickly (Connected → Disconnected)
 
 **What Happens During Disconnection:**
 - Relay Proxy container remains running
@@ -367,21 +368,14 @@ The dashboard includes a connection toggle that allows you to simulate network d
 - No new flag updates are received from LaunchDarkly
 - Internal Docker network connectivity (Redis access) is preserved
 - Dashboard continues to display cached flag data
-- Relay Proxy uses **exponential backoff** when attempting to reconnect (starts at ~3 seconds, increases to 60+ seconds)
+- **Status updates appear within seconds** - no long waiting periods
 
-**Important - Disconnection Delay:**
-When you toggle "Disconnect", the squid-proxy container is stopped immediately, but the **existing streaming connection takes 30 seconds to 2 minutes to fully shut down**. This is normal TCP behavior:
-- Stopping squid-proxy blocks new connections immediately
-- The existing streaming connection remains alive until it detects the network is down
-- TCP keepalive and application-level timeouts cause the connection to eventually fail
-- You'll see timeout errors in the Relay Proxy logs after 30-120 seconds
-
-**Important - Reconnection Delay:**
-When you toggle from "Disconnected" to "Connected", the Relay Proxy will **not reconnect immediately**. It will reconnect on its next scheduled retry attempt, which could be:
-- **3-10 seconds** if disconnected briefly
-- **30-60+ seconds** if disconnected for several minutes (due to exponential backoff)
-
-This delay exists because we cannot restart the container while disconnected (see "Why We Can't Restart During Disconnection" below).
+**Fast Connection Management:**
+Unlike traditional approaches that require waiting 30-120 seconds for TCP timeouts, this implementation uses squid-proxy container control for rapid state changes:
+- **Disconnect**: Squid-proxy stops immediately, blocking new connections
+- **Reconnect**: Squid-proxy starts immediately, allowing connections to resume
+- **Status Detection**: Dashboard polls every 5 seconds and detects state changes quickly
+- **No Long Delays**: Test connected/disconnected scenarios efficiently without waiting minutes
 
 **Testing Scenarios:**
 1. **Resilience Testing**: Verify your application continues to function with cached flags
@@ -963,18 +957,19 @@ The squid-proxy service is a critical infrastructure component that enables the 
 
 **Why We Need It:**
 - The Relay Proxy maintains a long-lived streaming connection to LaunchDarkly
-- Without squid-proxy, disconnecting requires stopping the entire relay-proxy container (slow, disruptive)
-- With squid-proxy, we can control network traffic by stopping/starting the proxy container (fast, non-disruptive)
+- Traditional disconnection methods require stopping the entire relay-proxy container (slow, disruptive, loses state)
+- With squid-proxy, we can control network traffic by stopping/starting the proxy container (fast, non-disruptive, preserves state)
 
 **How It Works:**
 1. **Traffic Routing**: The relay-proxy container is configured to route all outbound HTTP/HTTPS traffic through squid-proxy using the `HTTP_PROXY` and `HTTPS_PROXY` environment variables
 2. **Static IP Assignment**: squid-proxy has a fixed IP address (172.18.0.80) on the Docker network for reliable routing
 3. **Container Control**: The api-service can stop/start the squid-proxy container to block/allow traffic to LaunchDarkly
-4. **Fast Disconnection**: When you click "Disconnect" in the dashboard, squid-proxy is stopped - no relay-proxy restart needed
-5. **Fast Reconnection**: When you click "Connect", squid-proxy is started and the relay-proxy reconnects on its next retry attempt (typically 3-60 seconds depending on backoff state)
+4. **Fast Disconnection**: When you click "Disconnect" in the dashboard, squid-proxy is stopped immediately - connection state changes within seconds
+5. **Fast Reconnection**: When you click "Connect", squid-proxy is started immediately - relay-proxy detects and reconnects quickly
 
 **Benefits:**
-- **Speed**: Connection control happens in seconds (container stop/start) vs. 10-30 seconds (relay-proxy restart)
+- **Speed**: Connection state changes happen in seconds, not minutes - ideal for rapid testing
+- **No Waiting**: Test connected/disconnected scenarios efficiently without long TCP timeout delays
 - **Reliability**: The relay-proxy container stays running, preserving its internal state and Redis connections
 - **Realism**: Simulates real-world network issues (proxy failures, network outages) rather than container failures
 - **Observability**: You can watch the relay-proxy logs in real-time as it detects the disconnection and attempts to reconnect
@@ -984,9 +979,10 @@ The squid-proxy service is a critical infrastructure component that enables the 
 relay-proxy → squid-proxy (172.18.0.80:3128) → LaunchDarkly
                     ↑
               Container stop/start controls traffic here
+              (Fast state changes - seconds, not minutes)
 ```
 
-When disconnected, the squid-proxy container is stopped, causing the relay-proxy's streaming connection to timeout naturally (30-120 seconds) while preserving internal Docker network connectivity to Redis.
+When disconnected, the squid-proxy container is stopped, immediately blocking new connections while preserving internal Docker network connectivity to Redis.
 
 ### Port Mappings
 
