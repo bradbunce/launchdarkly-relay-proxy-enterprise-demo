@@ -240,7 +240,7 @@ The Relay Proxy (8030) and Redis (6379) ports are hardcoded and cannot be change
 - **Relay Proxy (8030)**: LaunchDarkly's architecture requires the Relay Proxy to run on port 8030 for proper SDK integration and event forwarding
 - **Redis (6379)**: The standard Redis port is required by the LaunchDarkly Relay Proxy configuration and PHP SDK daemon mode
 
-These ports are only accessible within the Docker network and are not exposed to the host machine by default, minimizing the risk of conflicts.
+These ports are fixed and cannot be changed, but they are exposed to the host machine (localhost:8030 and localhost:6379) for direct access and debugging.
 
 ### Troubleshooting Port Conflicts
 
@@ -995,8 +995,8 @@ All service ports are configurable via environment variables in the `.env` file,
 | Node.js App | 3000 | `NODE_SERVICE_PORT` | Backend API only (no UI) |
 | Python App | 5000 | `PYTHON_SERVICE_PORT` | Backend API only (no UI) |
 | PHP App | 8080 | `PHP_SERVICE_PORT` | Backend API only (no UI) |
-| Relay Proxy | 8030 | **FIXED** | LaunchDarkly Relay Proxy (cannot be changed) |
-| Redis | 6379 | **FIXED** | Internal only (cannot be changed) |
+| Relay Proxy | 8030 | **FIXED** | LaunchDarkly Relay Proxy (cannot be changed, exposed to host) |
+| Redis | 6379 | **FIXED** | Redis data store (cannot be changed, exposed to host) |
 | Squid Proxy | 3128 | `SQUID_PROXY_PORT` | HTTP proxy service |
 
 **Note**: The Relay Proxy and Redis ports are fixed and cannot be changed via environment variables. See the [Configurable Service Ports](#configurable-service-ports) section for details.
