@@ -729,7 +729,86 @@ function createApp() {
     return context;
   }
 
-  // Hash calculation endpoint for JavaScript Client
+  // Hash calculation endpoint for JavaScript Client (client-side SDK)
+  // This fetches flag configuration from the Relay Proxy's client-side endpoint
+  // to get the correct salt value for client-side flag evaluations
+  app.post('/api/calculate-hash-client-side', express.json(), async (req, res) => {
+    try {
+      const { contextKey, flagKey, clientSideId } = req.body;
+      
+      if (!contextKey || !flagKey || !clientSideId) {
+        return res.status(400).json({ 
+          error: 'contextKey, flagKey, and clientSideId are required' 
+        });
+      }
+      
+      // Fetch flag data from Relay Proxy's client-side SDK endpoint
+      const relayProxyUrl = process.env.RELAY_PROXY_URL || 'http://relay-proxy:8030';
+      const flagDataUrl = `${relayProxyUrl}/sdk/evalx/${clientSideId}/contexts/${encodeURIComponent(contextKey)}`;
+      
+      try {
+        const response = await fetch(flagDataUrl);
+        
+        if (!response.ok) {
+          return res.status(response.status).json({ 
+            error: `Failed to fetch flag data from Relay Proxy: ${response.statusText}` 
+          });
+        }
+        
+        const flagData = await response.json();
+        
+        // Find the specific flag in the response
+        const flagConfig = flagData[flagKey];
+        
+        if (!flagConfig) {
+          return res.status(404).json({ 
+            error: `Flag '${flagKey}' not found in client-side flag data` 
+          });
+        }
+        
+        // Extract salt from flag configuration
+        // Client-side flag data structure might have salt in different location
+        const salt = flagConfig.salt || flagConfig.trackEvents?.salt || flagKey;
+        
+        // Calculate hash value using HashValueExposer
+        const hashResult = hashExposer.expose({
+          flagKey,
+          contextKey,
+          salt
+        });
+        
+        if (hashResult.error) {
+          return res.status(500).json({ 
+            error: 'Failed to calculate hash',
+            details: hashResult.error 
+          });
+        }
+        
+        res.json({
+          success: true,
+          hashInfo: {
+            hashValue: hashResult.hashValue,
+            bucketValue: hashResult.bucketValue,
+            salt: hashResult.salt
+          }
+        });
+      } catch (fetchError) {
+        console.error('[Client-Side Hash Calculation] Fetch error:', fetchError);
+        return res.status(503).json({ 
+          error: 'Failed to connect to Relay Proxy',
+          details: fetchError.message 
+        });
+      }
+    } catch (error) {
+      console.error('[Client-Side Hash Calculation] Error:', error);
+      res.status(500).json({ 
+        error: 'Internal server error',
+        details: error.message 
+      });
+    }
+  });
+
+  // Hash calculation endpoint for server-side SDKs (Node.js, PHP, Python)
   // This allows the browser-based JavaScript Client to get hash values
   // since it can't access the HashValueExposer module directly
   app.post('/api/calculate-hash', express.json(), async (req, res) => {
@@ -751,18 +830,24 @@ function createApp() {
       }
       
       // Get the flag configuration from SDK data store to extract salt
-      const storeData = await ldClient.allFlagsState({kind: 'user', key: 'temp'}, {clientSideOnly: false, withReasons: false, detailsOnlyForTrackedFlags: false});
-      const allData = storeData.toJSON();
-      const flagConfig = allData[flagKey];
+      // Note: This gets server-side flag data. For client-side SDK hash calculations,
+      // the salt might differ if the flag configuration is different between
+      // server-side and client-side environments.
+      const store = ldClient.getInternalStore?.();
+      let salt = flagKey; // Default fallback
       
-      if (!flagConfig) {
-        return res.status(404).json({ 
-          error: `Flag '${flagKey}' not found` 
-        });
+      if (store) {
+        const storeData = store.inspect();
+        const flagConfig = storeData.features?.[flagKey];
+        
+        if (flagConfig && flagConfig.salt) {
+          salt = flagConfig.salt;
+        } else {
+          console.warn(`[Hash Calculation] Flag '${flagKey}' not found in store or has no salt, using flagKey as salt`);
+        }
+      } else {
+        console.warn('[Hash Calculation] SDK store not available, using flagKey as salt');
       }
-      
-      // Extract salt from flag configuration
-      const salt = flagConfig.salt || flagKey;
       
       // Calculate hash value using HashValueExposer
       const hashResult = hashExposer.expose({

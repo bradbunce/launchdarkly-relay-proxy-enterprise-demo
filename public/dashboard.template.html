@@ -2812,15 +2812,25 @@
       if (!hashElement || !context) return;
       
       try {
-        // Call the hash calculation API endpoint
-        const response = await fetch('http://localhost:${NODE_SERVICE_PORT}/api/calculate-hash', {
+        // Get the client-side ID from the meta tag
+        const clientSideId = document.querySelector('meta[name="ld-client-id"]')?.content;
+        
+        if (!clientSideId) {
+          hashElement.innerHTML = '<div style="color: #f44336;">Error: Client-side ID not found</div>';
+          return;
+        }
+        
+        // Call the client-side hash calculation API endpoint
+        // This fetches flag data from the Relay Proxy's client-side endpoint
+        const response = await fetch('http://localhost:${NODE_SERVICE_PORT}/api/calculate-hash-client-side', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
             contextKey: context.key,
-            flagKey: 'user-message'
+            flagKey: 'user-message',
+            clientSideId: clientSideId
           })
         });
         
