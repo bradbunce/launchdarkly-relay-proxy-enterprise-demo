@@ -734,11 +734,17 @@ function createApp() {
   // to get the correct salt value for client-side flag evaluations
   app.post('/api/calculate-hash-client-side', express.json(), async (req, res) => {
     try {
+      console.log('[Client-Side Hash] Request body:', req.body);
+      
       const { contextKey, flagKey, clientSideId } = req.body;
       
+      console.log('[Client-Side Hash] Parsed params:', { contextKey, flagKey, clientSideId });
+      
       if (!contextKey || !flagKey || !clientSideId) {
+        console.error('[Client-Side Hash] Missing required parameters');
         return res.status(400).json({ 
-          error: 'contextKey, flagKey, and clientSideId are required' 
+          error: 'contextKey, flagKey, and clientSideId are required',
+          received: { contextKey, flagKey, clientSideId }
         });
       }
       

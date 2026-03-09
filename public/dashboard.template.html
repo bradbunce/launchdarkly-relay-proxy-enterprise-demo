@@ -2815,10 +2815,21 @@
         // Get the client-side ID from the meta tag
         const clientSideId = document.querySelector('meta[name="ld-client-id"]')?.content;
         
+        console.log('[JavaScript Client] Hash calculation - Context:', context);
+        console.log('[JavaScript Client] Hash calculation - Client-side ID:', clientSideId);
+        
         if (!clientSideId) {
           hashElement.innerHTML = '<div style="color: #f44336;">Error: Client-side ID not found</div>';
           return;
         }
+        
+        const requestBody = {
+          contextKey: context.key,
+          flagKey: 'user-message',
+          clientSideId: clientSideId
+        };
+        
+        console.log('[JavaScript Client] Hash calculation request:', requestBody);
         
         // Call the client-side hash calculation API endpoint
         // This fetches flag data from the Relay Proxy's client-side endpoint
@@ -2827,14 +2838,12 @@
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            contextKey: context.key,
-            flagKey: 'user-message',
-            clientSideId: clientSideId
-          })
+          body: JSON.stringify(requestBody)
         });
         
         const data = await response.json();
+        
+        console.log('[JavaScript Client] Hash calculation response:', data);
         
         if (data.success && data.hashInfo) {
           const hashInfo = data.hashInfo;
