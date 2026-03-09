@@ -2755,7 +2755,7 @@
     let pythonSSE = null;
     
     // Update JavaScript Client panel with SDK data
-    function updateJavaScriptClientPanel() {
+    function updateJavaScriptClientPanel(identifySucceeded = true) {
       if (!window.jsClientSDK) {
         console.warn('[Dashboard] JavaScript Client SDK not initialized');
         return;
@@ -2765,10 +2765,21 @@
       // Don't override it here
       
       // Update flag value
-      const flagValue = window.jsClientSDK.variation('user-message', 'default');
+      // If identify failed (Relay Proxy down), the SDK will return the fallback value
+      const fallbackValue = 'Fallback: Relay Proxy unavailable';
+      const flagValue = window.jsClientSDK.variation('user-message', fallbackValue);
       const flagValueEl = document.getElementById('javascript-flag-value');
       if (flagValueEl) {
         flagValueEl.textContent = flagValue;
+        
+        // If we got the fallback value, style it differently to indicate offline mode
+        if (flagValue === fallbackValue) {
+          flagValueEl.style.backgroundColor = '#fff3cd';
+          flagValueEl.style.color = '#856404';
+        } else {
+          flagValueEl.style.backgroundColor = '#f0f2ff';
+          flagValueEl.style.color = '#405BFF';
+        }
       }
       
       // Update context info
@@ -3894,6 +3905,9 @@
               }
             }
             
+            // Track if identify succeeded
+            let identifySucceeded = false;
+            
             // Call SDK identify with timeout and error handling
             // If Relay Proxy is down, SDK will use cached data or fallback values
             try {
@@ -3903,19 +3917,21 @@
                   setTimeout(() => reject(new Error('Identify timeout')), 5000)
                 )
               ]);
+              identifySucceeded = true;
               console.log('✓ JavaScript Client context updated successfully:', ldContext);
             } catch (identifyError) {
-              // SDK identify failed (likely network error), but SDK will use cached/fallback values
-              console.warn('⚠️ JavaScript Client identify failed (Relay Proxy may be down), using cached/fallback values:', identifyError.message);
+              // SDK identify failed (likely network error)
+              // When context changes and server is unreachable, SDK should return fallback
+              console.warn('⚠️ JavaScript Client identify failed (Relay Proxy may be down):', identifyError.message);
+              console.log('→ Flag evaluations will return fallback values for the new context');
             }
             
             // Update stored context regardless of identify success
-            // The SDK will handle fallback internally
             this.currentContext = ldContext;
             
-            // Update UI
+            // Update UI - pass identifySucceeded flag to handle fallback display
             this.updateContextDisplay();
-            updateJavaScriptClientPanel();
+            updateJavaScriptClientPanel(identifySucceeded);
             
             return true;
           } catch (error) {
