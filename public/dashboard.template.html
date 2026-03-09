@@ -2765,9 +2765,19 @@
       // Don't override it here
       
       // Update flag value
-      // If identify failed (Relay Proxy down), the SDK will return the fallback value
       const fallbackValue = 'Fallback: Relay Proxy unavailable';
-      const flagValue = window.jsClientSDK.variation('user-message', fallbackValue);
+      let flagValue;
+      
+      // If identify failed (offline mode with new context), show fallback immediately
+      // Don't call variation() because SDK will use cached flag config to evaluate the new context
+      if (!identifySucceeded || window.jsClientOfflineMode) {
+        flagValue = fallbackValue;
+        console.log('[JavaScript Client] Using fallback value due to offline mode');
+      } else {
+        // Normal mode - SDK is connected and can fetch fresh data
+        flagValue = window.jsClientSDK.variation('user-message', fallbackValue);
+      }
+      
       const flagValueEl = document.getElementById('javascript-flag-value');
       if (flagValueEl) {
         flagValueEl.textContent = flagValue;
@@ -2794,8 +2804,10 @@
         contextKeyEl.textContent = context.key;
       }
       
-      // Update hash info with evaluation details
-      updateJavaScriptHashInfo(context);
+      // Update hash info with evaluation details (skip if offline)
+      if (!window.jsClientOfflineMode) {
+        updateJavaScriptHashInfo(context);
+      }
       
       // Update SDK cache display
       const allFlags = window.jsClientSDK.allFlags();
@@ -3921,9 +3933,12 @@
               console.log('✓ JavaScript Client context updated successfully:', ldContext);
             } catch (identifyError) {
               // SDK identify failed (likely network error)
-              // When context changes and server is unreachable, SDK should return fallback
+              // When context changes and server is unreachable, we should show fallback
               console.warn('⚠️ JavaScript Client identify failed (Relay Proxy may be down):', identifyError.message);
               console.log('→ Flag evaluations will return fallback values for the new context');
+              
+              // Mark that we're in offline mode with a new context
+              window.jsClientOfflineMode = true;
             }
             
             // Update stored context regardless of identify success
@@ -3932,6 +3947,11 @@
             // Update UI - pass identifySucceeded flag to handle fallback display
             this.updateContextDisplay();
             updateJavaScriptClientPanel(identifySucceeded);
+            
+            // Clear offline mode flag after a short delay if identify succeeded
+            if (identifySucceeded && window.jsClientOfflineMode) {
+              window.jsClientOfflineMode = false;
+            }
             
             return true;
           } catch (error) {
