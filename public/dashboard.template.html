@@ -3894,17 +3894,29 @@
               }
             }
             
-            // Call SDK identify
-            await window.jsClientSDK.identify(ldContext);
+            // Call SDK identify with timeout and error handling
+            // If Relay Proxy is down, SDK will use cached data or fallback values
+            try {
+              await Promise.race([
+                window.jsClientSDK.identify(ldContext),
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('Identify timeout')), 5000)
+                )
+              ]);
+              console.log('✓ JavaScript Client context updated successfully:', ldContext);
+            } catch (identifyError) {
+              // SDK identify failed (likely network error), but SDK will use cached/fallback values
+              console.warn('⚠️ JavaScript Client identify failed (Relay Proxy may be down), using cached/fallback values:', identifyError.message);
+            }
             
-            // Update stored context
+            // Update stored context regardless of identify success
+            // The SDK will handle fallback internally
             this.currentContext = ldContext;
             
             // Update UI
             this.updateContextDisplay();
             updateJavaScriptClientPanel();
             
-            console.log('✓ JavaScript Client context updated:', ldContext);
             return true;
           } catch (error) {
             console.error('Failed to update JavaScript Client context:', error);
