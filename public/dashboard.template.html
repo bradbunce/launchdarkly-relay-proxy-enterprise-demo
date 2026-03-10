@@ -3742,9 +3742,9 @@
           
           console.log('[JavaScript Client] Browser console logger initialized');
           
-          // Listen for SDK ready event (initial connection and reconnections)
+          // Listen for SDK ready event (initial connection)
           window.jsClientSDK.on('ready', () => {
-            console.log('[JavaScript Client] SDK ready - connection established');
+            console.log('[JavaScript Client] SDK ready event fired - connection established');
             updatePillStatus('javascript', 'connected');
             
             // If we were in offline mode with a pending context change, retry identify
@@ -3773,25 +3773,70 @@
             }
           });
           
-          // Listen for SDK flag changes
+          // Listen for SDK flag changes (this fires on reconnection when flags are updated)
           window.jsClientSDK.on('change', () => {
-            console.log('[JavaScript Client] SDK flag changed');
+            console.log('[JavaScript Client] SDK change event fired - flags updated');
             
-            // Clear offline mode on successful flag change (means we're connected)
-            if (window.jsClientOfflineMode) {
+            // If we were in offline mode with a pending context, retry identify
+            if (window.jsClientOfflineMode && window.jsClientPendingContext) {
+              console.log('[JavaScript Client] Connection restored (change event) - retrying identify with pending context:', window.jsClientPendingContext);
+              
+              // Retry the identify call now that we're connected
+              window.jsClientSDK.identify(window.jsClientPendingContext)
+                .then(() => {
+                  console.log('[JavaScript Client] Successfully identified with pending context after reconnection');
+                  window.jsClientOfflineMode = false;
+                  window.jsClientPendingContext = null;
+                  updateJavaScriptClientPanel(true);
+                })
+                .catch((error) => {
+                  console.error('[JavaScript Client] Failed to identify after reconnection:', error);
+                });
+            } else if (window.jsClientOfflineMode) {
+              // Clear offline mode on successful flag change (means we're connected)
               console.log('[JavaScript Client] Flag change received - clearing offline mode');
               window.jsClientOfflineMode = false;
               window.jsClientPendingContext = null;
+              updateJavaScriptClientPanel(true);
+            } else {
+              // Normal flag change
+              updateJavaScriptClientPanel(true);
             }
-            
-            updateJavaScriptClientPanel(true);
           });
           
           // Listen for SDK errors
           window.jsClientSDK.on('error', (error) => {
-            console.error('[JavaScript Client] SDK error:', error);
+            console.error('[JavaScript Client] SDK error event fired:', error);
             updatePillStatus('javascript', 'disconnected');
           });
+          
+          // Add periodic check for reconnection (fallback mechanism)
+          // Check every 2 seconds if we're in offline mode and SDK is now ready
+          setInterval(() => {
+            if (window.jsClientOfflineMode && window.jsClientPendingContext) {
+              // Check if SDK is connected by trying to get flags
+              try {
+                const allFlags = window.jsClientSDK.allFlags();
+                // If we can get flags and have more than 0, we're likely connected
+                if (Object.keys(allFlags).length > 0) {
+                  console.log('[JavaScript Client] Periodic check detected connection - retrying identify');
+                  
+                  window.jsClientSDK.identify(window.jsClientPendingContext)
+                    .then(() => {
+                      console.log('[JavaScript Client] Successfully identified with pending context (periodic check)');
+                      window.jsClientOfflineMode = false;
+                      window.jsClientPendingContext = null;
+                      updateJavaScriptClientPanel(true);
+                    })
+                    .catch((error) => {
+                      console.log('[JavaScript Client] Identify still failing (periodic check):', error.message);
+                    });
+                }
+              } catch (error) {
+                // Still offline
+              }
+            }
+          }, 2000);
           
           // Add error listener to main LaunchDarkly SDK
           ldClient.on('error', (error) => {
