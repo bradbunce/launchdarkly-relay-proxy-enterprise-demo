@@ -1062,6 +1062,16 @@ This demo showcases SDK integration across four different languages, each demons
 - Sends analytics events through the Relay Proxy
 - Runs as part of the dashboard at http://localhost:8000
 
+**Offline Behavior & Automatic Reconnection:**
+- When Relay Proxy is unavailable and context changes, displays fallback variation
+- Automatically detects reconnection and retries failed identify() calls
+- Stores pending context changes and applies them when connection is restored
+- SDK Data Store shows "⚠️ Offline - Data may be stale" warning during disconnection
+- Reconnection detection uses multiple mechanisms:
+  - SDK `change` event (fires when SDK reconnects and syncs flags)
+  - Periodic check every 2 seconds (fallback mechanism)
+  - Automatically retries identify with pending context within 2 seconds of reconnection
+
 All applications:
 - Evaluate the same feature flags
 - Send analytics events to LaunchDarkly
