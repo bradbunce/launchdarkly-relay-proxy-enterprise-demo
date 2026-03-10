@@ -802,6 +802,102 @@ The dashboard maintains persistent SSE connections to both Node.js and PHP servi
 
 This design ensures the demo can run for extended periods without manual intervention or resource issues.
 
+### Service Panels Overview
+
+The dashboard displays four service panels, each demonstrating a different LaunchDarkly SDK implementation. Panel 1 is dynamic and switches between Node.js, Python, and JavaScript Client based on the `dashboard-service-panel-1` feature flag.
+
+#### Node.js Service Panel (Panel 1 - Dynamic)
+
+**What It Shows:**
+- Flag evaluation for `user-message` flag
+- Current context (anonymous or custom with attributes)
+- Bucketing hash values (context key, salt, hash, bucket value)
+- SDK Data Store (raw flag configurations cached by the SDK)
+- Context editor for testing different user attributes
+- Test flag evaluation button
+
+**SDK Client Behavior:**
+- **Mode**: Proxy Mode (Server-Side SDK)
+- **Connection**: All traffic through Relay Proxy
+- **Updates**: Real-time streaming (instant flag changes)
+- **Caching**: SDK caches flag configurations locally
+- **Events**: Analytics events sent through Relay Proxy
+- **Offline Behavior**: Uses cached flags when Relay Proxy is unavailable
+
+#### Python Service Panel (Panel 1 - Dynamic)
+
+**What It Shows:**
+- Flag evaluation for `user-message` flag
+- Current context (anonymous or custom with attributes)
+- Bucketing hash values (context key, salt, hash, bucket value)
+- SDK Data Store (raw flag configurations cached by the SDK)
+- Context editor for testing different user attributes
+- Test flag evaluation button
+
+**SDK Client Behavior:**
+- **Mode**: Default Mode (Server-Side SDK)
+- **Connection**: Direct to LaunchDarkly (bypasses Relay Proxy and Squid Proxy)
+- **Updates**: Real-time streaming (instant flag changes)
+- **Caching**: SDK caches flag configurations locally
+- **Events**: Analytics events sent directly to LaunchDarkly
+- **Offline Behavior**: Uses cached flags when LaunchDarkly is unavailable
+- **Independence**: Continues working even when Relay Proxy is down
+
+#### JavaScript Client Panel (Panel 1 - Dynamic)
+
+**What It Shows:**
+- Flag evaluation for `user-message` flag
+- Current context (anonymous or custom with attributes)
+- Bucketing hash values (context key, salt, hash, bucket value)
+- SDK Data Store (evaluated flag values for current context)
+- Context editor for testing different user attributes
+- Test flag evaluation button
+
+**SDK Client Behavior:**
+- **Mode**: Proxy Mode (Client-Side SDK)
+- **Connection**: All traffic through Relay Proxy (runs in browser)
+- **Updates**: Real-time streaming (instant flag changes)
+- **Caching**: SDK caches evaluated flag values for current context only (NOT flag configurations)
+- **Events**: Analytics events sent through Relay Proxy
+- **Offline Behavior**: 
+  - Shows fallback variation when context changes and Relay Proxy is unavailable
+  - Automatically retries identify() when connection is restored
+  - Displays "⚠️ Offline - Data may be stale" warning in SDK Data Store
+  - Reconnection detected within 2 seconds via periodic check
+
+**Key Difference from Server-Side SDKs:**
+- Client-side SDKs do NOT cache flag configurations
+- They only cache evaluated flag values for the current context
+- When context changes offline, SDK cannot evaluate and returns fallback value
+- Server-side SDKs cache flag configurations and can evaluate any context offline
+
+#### PHP Service Panel (Panel 2 - Fixed)
+
+**What It Shows:**
+- Flag evaluation for `user-message` flag
+- Current context (anonymous or custom with attributes)
+- Bucketing hash values (context key, salt, hash, bucket value)
+- SDK Data Store (raw flag configurations from Redis)
+- Context editor for testing different user attributes
+- Test flag evaluation button
+
+**SDK Client Behavior:**
+- **Mode**: Daemon Mode (Server-Side SDK)
+- **Connection**: Reads flags from Redis, sends events through Relay Proxy
+- **Updates**: Polling-based (5-second delay for flag changes)
+- **Caching**: Reads directly from Redis (no local cache)
+- **Events**: Analytics events sent through Relay Proxy
+- **Offline Behavior**: 
+  - Works even when Relay Proxy is down (reads from Redis)
+  - Highest resilience - survives Relay Proxy restarts
+  - Highest performance - <1ms latency (local Redis reads)
+  - Trade-off: 5-second delay for flag updates vs instant streaming
+
+**Key Difference from Other Modes:**
+- Only SDK that reads flags from Redis instead of streaming/polling LaunchDarkly
+- Requires Relay Proxy to populate Redis, but doesn't need it for flag reads
+- Best for high-throughput applications (4000+ requests/second)
+
 ### Terminal Panels Window
 
 The dashboard includes a separate browser window for viewing real-time container logs, controlled by the `terminal-panels` feature flag:
