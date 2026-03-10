@@ -79,9 +79,10 @@ This demo requires **three feature flags** to be created in your LaunchDarkly pr
    - "Hello from LaunchDarkly!"
    - "Welcome to the demo!"
    - "Greetings from the Relay Proxy!"
-4. Configure the flag (choose one approach):
-   - **Option A**: Turn the flag ON and set a default variation
-   - **Option B**: Leave the flag OFF and configure targeting rules to serve specific variations
+4. Configure the flag:
+   - Turn targeting ON or OFF to control which variation is served
+   - When targeting is ON, configure rules to serve specific variations to different contexts
+   - When targeting is OFF, all contexts receive the off variation
 
 **Purpose**: Primary demo flag that displays different messages to users. Used to demonstrate flag evaluation, targeting rules, and real-time updates across both Node.js and PHP applications.
 
@@ -91,9 +92,10 @@ This demo requires **three feature flags** to be created in your LaunchDarkly pr
 3. Two variations:
    - `true` (open terminal panels in separate window)
    - `false` (close terminal panels window)
-4. Configure the flag (choose one approach):
-   - **Option A**: Turn the flag ON and set default to `true`
-   - **Option B**: Leave the flag OFF and configure targeting rules to serve `true` or `false`
+4. Configure the flag:
+   - Turn targeting ON or OFF to control terminal window behavior
+   - When targeting is ON, configure rules to serve `true` or `false` to different contexts
+   - When targeting is OFF, all contexts receive the off variation (`false`)
 
 **Purpose**: Controls whether terminal log panels open in a separate browser window. When set to `true`, a popup window displays real-time container logs for all services. When set to `false`, the terminal window closes automatically. Demonstrates real-time UI control and window management via feature flags.
 
@@ -104,9 +106,10 @@ This demo requires **three feature flags** to be created in your LaunchDarkly pr
    - `nodejs` (show Node.js panel)
    - `python` (show Python panel)
    - `javascript` (show JavaScript Client panel)
-4. Configure the flag (choose one approach):
-   - **Option A**: Turn the flag ON and set default to `nodejs`
-   - **Option B**: Leave the flag OFF and configure targeting rules to serve `nodejs`, `python`, or `javascript`
+4. Configure the flag:
+   - Turn targeting ON or OFF to control which service panel is displayed
+   - When targeting is ON, configure rules to serve `nodejs`, `python`, or `javascript` to different contexts
+   - When targeting is OFF, all contexts receive the off variation (defaults to `python`)
 
 **Purpose**: Controls which service is displayed in Panel 1 of the dashboard. Demonstrates dynamic UI panel switching via feature flags. Changes apply instantly without page refresh, and the terminal panels window automatically synchronizes to match the selected service.
 
