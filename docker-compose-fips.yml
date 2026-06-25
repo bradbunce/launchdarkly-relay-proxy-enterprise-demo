@@ -1,0 +1,12 @@
+# LaunchDarkly FIPS relay build (Microsoft Go GOEXPERIMENT=systemcrypto / OpenSSL).
+# Use with the base compose file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose-fips.yml up -d --build
+
+services:
+  relay-proxy:
+    build:
+      context: ./relay-proxy
+      dockerfile: Dockerfile.fips
+      args:
+        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-8.16.4}

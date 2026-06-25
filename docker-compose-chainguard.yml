@@ -1,0 +1,14 @@
+# Chainguard go-fips relay build only.
+# Requires CHAINGUARD_ORG in .env and chainctl auth login.
+# Use with the base compose file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose-chainguard.yml up -d --build
+
+services:
+  relay-proxy:
+    build:
+      context: ./relay-proxy
+      dockerfile: Dockerfile.chainguard
+      args:
+        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-8.16.4}
+        CHAINGUARD_ORG: ${CHAINGUARD_ORG}

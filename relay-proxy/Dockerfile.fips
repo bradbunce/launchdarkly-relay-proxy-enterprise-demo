@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Based on launchdarkly/ld-relay v8 with FIPS via Microsoft Go systemcrypto (OpenSSL):
+# LaunchDarkly ld-relay v8 Dockerfile with Microsoft Go GOEXPERIMENT=systemcrypto (OpenSSL FIPS):
 # https://github.com/launchdarkly/ld-relay/blob/v8/Dockerfile
 # https://github.com/microsoft/go/blob/microsoft/main/eng/doc/fips/README.md
 
@@ -22,7 +22,6 @@ RUN tar -xzf /tmp/ld-relay.tar.gz -C $SRC_DIR --strip-components=1 \
 
 ENV CGO_ENABLED=1
 ENV GOOS=linux
-# systemcrypto is default in Microsoft Go 1.25+; set explicitly for clarity
 ENV GOEXPERIMENT=systemcrypto
 
 RUN go build -a -o ldr .
@@ -38,6 +37,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
  && rm -rf /var/lib/apt/lists/*
+
+ARG SRC_DIR=/go/ld-relay
 
 COPY --from=builder /go/ld-relay/ldr /usr/bin/ldr
 

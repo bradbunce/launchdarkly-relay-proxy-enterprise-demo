@@ -118,7 +118,7 @@ This demo requires **three feature flags** to be created in your LaunchDarkly pr
 ### 3. Run with Docker Compose
 
 ```bash
-# Start all services (builds relay-proxy with Microsoft Go systemcrypto/OpenSSL on first run)
+# Start all services
 docker-compose up -d
 
 # View logs
@@ -130,6 +130,19 @@ docker-compose logs -f
 # API service: http://localhost:4000 (backend only)
 # PHP API: http://localhost:8080 (backend only)
 # Python API: http://localhost:5000 (backend only)
+```
+
+**Relay proxy options** (pick one):
+
+```bash
+# Default — official LaunchDarkly image
+docker compose up -d
+
+# LaunchDarkly native FIPS (Microsoft Go systemcrypto, relay-proxy/Dockerfile.fips)
+docker compose -f docker-compose.yml -f docker-compose-fips.yml up -d --build
+
+# Chainguard go-fips only (relay-proxy/Dockerfile.chainguard; set CHAINGUARD_ORG in .env)
+docker compose -f docker-compose.yml -f docker-compose-chainguard.yml up -d --build
 ```
 
 ### 4. Changing Configuration
@@ -1053,7 +1066,9 @@ This application uses a microservices architecture with eight specialized contai
 - Purpose: User interface with embedded JavaScript SDK demonstration
 
 **relay-proxy** (Relay Proxy Container):
-- LaunchDarkly Relay Proxy v8.16.4 (local FIPS build via Microsoft Go `GOEXPERIMENT=systemcrypto`/OpenSSL; see `relay-proxy/Dockerfile`)
+- Default: official `launchdarkly/ld-relay` image (`docker-compose.yml`)
+- FIPS: local build via `docker-compose-fips.yml` + `relay-proxy/Dockerfile.fips` (Microsoft Go `GOEXPERIMENT=systemcrypto`)
+- Chainguard: local build via `docker-compose-chainguard.yml` + `relay-proxy/Dockerfile.chainguard`
 - AutoConfig mode
 - Event forwarding enabled
 - Redis integration for persistent storage
