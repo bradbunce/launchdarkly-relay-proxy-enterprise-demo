@@ -154,7 +154,12 @@ services:
   # Health Check: None (relies on Redis health check)
   relay-proxy:
     container_name: relay-proxy
-    image: launchdarkly/ld-relay:8.16.4-static-debian12-nonroot-arm64v8
+    build:
+      context: ./relay-proxy
+      dockerfile: Dockerfile
+      args:
+        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-8.16.4}
+    image: ld-relay-systemcrypto:${LD_RELAY_VERSION:-8.16.4}
     ports:
       - "8030:8030"  # External:Internal - Relay proxy API
     # Environment Variables:

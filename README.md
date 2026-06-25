@@ -118,7 +118,7 @@ This demo requires **three feature flags** to be created in your LaunchDarkly pr
 ### 3. Run with Docker Compose
 
 ```bash
-# Start all services
+# Start all services (builds relay-proxy with Microsoft Go systemcrypto/OpenSSL on first run)
 docker-compose up -d
 
 # View logs
@@ -1053,7 +1053,7 @@ This application uses a microservices architecture with eight specialized contai
 - Purpose: User interface with embedded JavaScript SDK demonstration
 
 **relay-proxy** (Relay Proxy Container):
-- LaunchDarkly Relay Proxy v8.16.4
+- LaunchDarkly Relay Proxy v8.16.4 (local FIPS build via Microsoft Go `GOEXPERIMENT=systemcrypto`/OpenSSL; see `relay-proxy/Dockerfile`)
 - AutoConfig mode
 - Event forwarding enabled
 - Redis integration for persistent storage
