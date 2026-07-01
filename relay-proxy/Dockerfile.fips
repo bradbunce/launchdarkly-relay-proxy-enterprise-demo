@@ -1,16 +1,17 @@
 # syntax=docker/dockerfile:1
-#
-# LaunchDarkly ld-relay v8 Dockerfile with Microsoft Go GOEXPERIMENT=systemcrypto (OpenSSL FIPS):
-# https://github.com/launchdarkly/ld-relay/blob/v8/Dockerfile
-# https://github.com/microsoft/go/blob/microsoft/main/eng/doc/fips/README.md
 
-ARG LD_RELAY_VERSION=8.16.4
-ARG MS_GO_IMAGE=mcr.microsoft.com/oss/go/microsoft/golang:1.26-bookworm
+# This is a standalone Dockerfile that does not depend on goreleaser building the binary
+# It is NOT the version that is pushed to dockerhub
+# FIPS 140-3: native Go Cryptographic Module (GOFIPS140). Based on ld-relay v8 Dockerfile.
+FROM golang:1.26.4-alpine3.24 as builder
+# See "Runtime platform versions" in CONTRIBUTING.md
 
-FROM ${MS_GO_IMAGE} AS builder
+RUN apk --no-cache add \
+    libc-dev \
+ && rm -rf /var/cache/apk/*
 
-ARG LD_RELAY_VERSION
 ARG SRC_DIR=/go/ld-relay
+ARG LD_RELAY_VERSION=8.16.4
 
 RUN mkdir -p $SRC_DIR
 
@@ -20,27 +21,29 @@ ADD https://github.com/launchdarkly/ld-relay/archive/refs/tags/v${LD_RELAY_VERSI
 RUN tar -xzf /tmp/ld-relay.tar.gz -C $SRC_DIR --strip-components=1 \
     && rm /tmp/ld-relay.tar.gz
 
-ENV CGO_ENABLED=1
+ENV CGO_ENABLED=0
 ENV GOOS=linux
-ENV GOEXPERIMENT=systemcrypto
+ENV GOFIPS140=v1.0.0
+ENV GOPATH=/go
 
 RUN go build -a -o ldr .
 
-FROM debian:bookworm-slim
+FROM alpine:3.24.1
 
-RUN groupadd --gid 1000 ldr-user && \
-    useradd --uid 1000 --gid ldr-user --create-home --shell /usr/sbin/nologin ldr-user && \
+RUN addgroup -g 1000 -S ldr-user && \
+    adduser -u 1000 -S ldr-user -G ldr-user && \
     mkdir /ldr && \
-    chown ldr-user:ldr-user /ldr
+    chown 1000:1000 /ldr
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     ca-certificates \
-    libssl3 \
- && rm -rf /var/lib/apt/lists/*
+ && apk add --upgrade libcrypto3 libssl3 \
+ && update-ca-certificates \
+ && rm -rf /var/cache/apk/*
 
 ARG SRC_DIR=/go/ld-relay
 
-COPY --from=builder /go/ld-relay/ldr /usr/bin/ldr
+COPY --from=builder ${SRC_DIR}/ldr /usr/bin/ldr
 
 USER 1000
 

@@ -1,4 +1,4 @@
-# LaunchDarkly FIPS relay build (Microsoft Go GOEXPERIMENT=systemcrypto / OpenSSL).
+# LaunchDarkly FIPS relay build (native Go GOFIPS140).
 # Use with the base compose file:
 #
 #   docker compose -f docker-compose.yml -f docker-compose-fips.yml up -d --build

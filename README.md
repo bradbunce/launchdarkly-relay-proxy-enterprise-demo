@@ -138,7 +138,7 @@ docker-compose logs -f
 # Default — official LaunchDarkly image
 docker compose up -d
 
-# LaunchDarkly native FIPS (Microsoft Go systemcrypto, relay-proxy/Dockerfile.fips)
+# LaunchDarkly native FIPS (GOFIPS140, relay-proxy/Dockerfile.fips)
 docker compose -f docker-compose.yml -f docker-compose-fips.yml up -d --build
 
 # Chainguard go-fips only (relay-proxy/Dockerfile.chainguard; set CHAINGUARD_ORG in .env)
@@ -1067,7 +1067,7 @@ This application uses a microservices architecture with eight specialized contai
 
 **relay-proxy** (Relay Proxy Container):
 - Default: official `launchdarkly/ld-relay` image (`docker-compose.yml`)
-- FIPS: local build via `docker-compose-fips.yml` + `relay-proxy/Dockerfile.fips` (Microsoft Go `GOEXPERIMENT=systemcrypto`)
+- FIPS: local build via `docker-compose-fips.yml` + `relay-proxy/Dockerfile.fips` (native Go `GOFIPS140=v1.0.0`)
 - Chainguard: local build via `docker-compose-chainguard.yml` + `relay-proxy/Dockerfile.chainguard`
 - AutoConfig mode
 - Event forwarding enabled
