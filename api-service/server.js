@@ -134,6 +134,7 @@ const ControlStateManager = require('./src/monitoring/ControlStateManager');
 
 // Import Docker control functions
 const { stopSquidProxy, startSquidProxy, getSquidProxyStatus } = require('./src/docker/squidProxyControl');
+const { stopRelayPortProxy, startRelayPortProxy, getRelayPortProxyStatus } = require('./src/docker/relayPortProxyControl');
 
 // Instantiate monitoring components
 const logMonitor = new LogMonitor('relay-proxy');
@@ -1603,6 +1604,98 @@ app.get('/api/python/message/stream', async (req, res) => {
   }
 });
 
+const dataSystemAppUrl = () => process.env.DATA_SYSTEM_APP_URL || 'http://data-system-app:5001';
+
+app.get('/api/data-system/status', async (req, res) => {
+  try {
+    const portStatus = await getRelayPortProxyStatus();
+    const response = await fetchWithTimeout(
+      `${dataSystemAppUrl()}/api/data-system`,
+      {},
+      5000
+    );
+    const data = await response.json();
+    data.relayPortOpen = portStatus.open;
+    data.relayPortState = portStatus.state;
+    res.status(response.status).json(data);
+  } catch (error) {
+    logError('/api/data-system/status', error, {
+      upstreamUrl: `${dataSystemAppUrl()}/api/data-system`
+    });
+    const portStatus = await getRelayPortProxyStatus();
+    res.status(500).json({
+      connected: false,
+      mode: 'data-system-custom',
+      sdkInitialized: false,
+      error: 'Unable to connect to data-system application',
+      relayPortOpen: portStatus.open,
+      relayPortState: portStatus.state,
+      path: [],
+      events: []
+    });
+  }
+});
+
+app.get('/api/data-system/flag', async (req, res) => {
+  try {
+    const response = await fetchWithTimeout(`${dataSystemAppUrl()}/api/flag`, {}, 5000);
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    logError('/api/data-system/flag', error);
+    res.status(500).json({
+      error: 'Unable to connect to data-system application',
+      value: 'Hello from Data System!'
+    });
+  }
+});
+
+app.get('/api/data-system/relay-port', async (req, res) => {
+  const portStatus = await getRelayPortProxyStatus();
+  res.status(portStatus.success ? 200 : 500).json({
+    open: portStatus.open,
+    running: portStatus.running,
+    state: portStatus.state,
+    error: portStatus.error
+  });
+});
+
+app.post('/api/data-system/relay-port/kill', async (req, res) => {
+  const result = await stopRelayPortProxy();
+  if (result.success) {
+    res.json({
+      success: true,
+      open: false,
+      state: 'killed',
+      message: 'Relay Proxy stopped. Node.js and JavaScript Client lose Relay; the data-system SDK falls back to LaunchDarkly.'
+    });
+  } else {
+    logError('/api/data-system/relay-port/kill', new Error(result.error));
+    res.status(500).json({
+      success: false,
+      error: result.error
+    });
+  }
+});
+
+app.post('/api/data-system/relay-port/restore', async (req, res) => {
+  const result = await startRelayPortProxy();
+  if (result.success) {
+    res.json({
+      success: true,
+      open: true,
+      state: 'open',
+      message: 'Relay Proxy restored. Port 8030 is available again for every SDK.'
+    });
+  } else {
+    logError('/api/data-system/relay-port/restore', new Error(result.error));
+    res.status(500).json({
+      success: false,
+      error: result.error
+    });
+  }
+});
+
 // Feature flag evaluation endpoint for dashboard panel selection
 // Initialize LaunchDarkly SDK client for flag evaluation
 let dashboardFlagClient = null;
@@ -1676,7 +1769,7 @@ app.get('/api/flag/dashboard-service-panel-1', async (req, res) => {
 // Container logs endpoint
 app.get('/api/logs/:container', async (req, res) => {
   const { container } = req.params;
-  const allowedContainers = ['node-app-dev', 'php-app-dev', 'python-app-dev', 'relay-proxy', 'redis'];
+  const allowedContainers = ['node-app-dev', 'php-app-dev', 'python-app-dev', 'relay-proxy', 'redis', 'data-system-app'];
   
   // Validate container name against allowlist
   if (!allowedContainers.includes(container)) {
@@ -1709,7 +1802,7 @@ app.get('/api/logs/:container', async (req, res) => {
 // Clear container logs endpoint
 app.post('/api/logs/:container/clear', async (req, res) => {
   const { container } = req.params;
-  const allowedContainers = ['node-app-dev', 'php-app-dev', 'python-app-dev', 'relay-proxy', 'redis'];
+  const allowedContainers = ['node-app-dev', 'php-app-dev', 'python-app-dev', 'relay-proxy', 'redis', 'data-system-app'];
   
   // Validate container name against allowlist
   if (!allowedContainers.includes(container)) {

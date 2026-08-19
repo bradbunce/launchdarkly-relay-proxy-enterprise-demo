@@ -1,6 +1,6 @@
 # LaunchDarkly Relay Proxy Enterprise Demo - Docker Compose Configuration
 #
-# This configuration defines an 8-container microservices architecture:
+# This configuration defines a 9-container microservices architecture:
 # 1. dashboard - Static web UI with embedded JavaScript Client SDK (Nginx)
 # 2. api-service - API gateway for status checks and operations
 # 3. app (node-app-dev) - Node.js SDK demonstration
@@ -9,6 +9,7 @@
 # 6. php (php-app-dev) - PHP SDK demonstration
 # 7. python (python-app-dev) - Python SDK demonstration
 # 8. squid-proxy - HTTP proxy for relay-proxy connection management
+# 9. data-system - Python SDK data system builder (Relay with LaunchDarkly fallback)
 
 services:
   # ============================================================================
@@ -32,6 +33,7 @@ services:
     # - NODE_SERVICE_PORT: Node service port for template substitution
     # - PHP_SERVICE_PORT: PHP service port for template substitution
     # - PYTHON_SERVICE_PORT: Python service port for template substitution
+    # - DATA_SYSTEM_PORT: Data system service port for template substitution
     # - SQUID_PROXY_PORT: Squid proxy port for template substitution
     environment:
       - LAUNCHDARKLY_CLIENT_SIDE_ID=${LAUNCHDARKLY_CLIENT_SIDE_ID}
@@ -40,6 +42,7 @@ services:
       - NODE_SERVICE_PORT=${NODE_SERVICE_PORT:-3000}
       - PHP_SERVICE_PORT=${PHP_SERVICE_PORT:-8080}
       - PYTHON_SERVICE_PORT=${PYTHON_SERVICE_PORT:-5000}
+      - DATA_SYSTEM_PORT=${DATA_SYSTEM_PORT:-5001}
       - SQUID_PROXY_PORT=${SQUID_PROXY_PORT:-3128}
     networks:
       launchdarkly-network:
@@ -81,6 +84,7 @@ services:
       - NODE_APP_URL=http://node-app-dev:${NODE_SERVICE_PORT:-3000}
       - PHP_APP_URL=http://php-app-dev:80
       - PYTHON_APP_URL=http://python-app-dev:${PYTHON_SERVICE_PORT:-5000}
+      - DATA_SYSTEM_APP_URL=http://data-system-app:${DATA_SYSTEM_PORT:-5001}
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
     # Volume Mounts:
     # - Docker socket: Required for executing Docker commands (logs, stats, container control)
@@ -154,7 +158,7 @@ services:
   # Health Check: None (relies on Redis health check)
   relay-proxy:
     container_name: relay-proxy
-    image: launchdarkly/ld-relay:8.16.4-static-debian12-nonroot-arm64v8
+    image: launchdarkly/ld-relay:9.0.0-rc.5-static-debian12-nonroot-arm64v8
     ports:
       - "8030:8030"  # External:Internal - Relay proxy API
     # Environment Variables:
@@ -319,6 +323,37 @@ services:
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "3128"]
       interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # ============================================================================
+  # Data System Application (SDK fallback demonstration)
+  # ============================================================================
+  # Purpose: Demonstrates Python SDK datasystem.custom() with Relay-first
+  #          streaming and automatic fallback to LaunchDarkly
+  # Port: 5001
+  # SDK Mode: Custom data system (Relay streaming → LD streaming → LD polling)
+  data-system:
+    container_name: data-system-app
+    build:
+      context: ./data-system
+      dockerfile: Dockerfile
+    ports:
+      - "${DATA_SYSTEM_PORT:-5001}:5001"
+    environment:
+      - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
+      - PORT=${DATA_SYSTEM_PORT:-5001}
+      - DASHBOARD_PORT=${DASHBOARD_PORT:-8000}
+      - NODE_SERVICE_PORT=${NODE_SERVICE_PORT:-3000}
+      - RELAY_URI=http://relay-proxy:8030
+    networks:
+      launchdarkly-network:
+        ipv4_address: 172.18.0.100
+    depends_on:
+      - relay-proxy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 10s
       timeout: 3s
       retries: 3
 

@@ -15,7 +15,7 @@ This document provides comprehensive information about port configuration in the
 
 ## Overview
 
-The LaunchDarkly demo application uses a microservices architecture with eight containerized services. Six of these services have configurable external ports, while two infrastructure services (Relay Proxy and Redis) use fixed ports required by the LaunchDarkly architecture.
+The LaunchDarkly demo application uses a microservices architecture with nine containerized services. Seven of these services have configurable external ports, while Relay Proxy and Redis use fixed ports required by the LaunchDarkly architecture.
 
 ### Why Configurable Ports?
 
@@ -115,6 +115,21 @@ The Python service demonstrates:
 - Direct event sending to LaunchDarkly
 
 **Port Mapping**: `${PYTHON_SERVICE_PORT}:5000` (external:internal)
+
+### Data System Service
+
+**Environment Variable**: `DATA_SYSTEM_PORT`  
+**Default Value**: `5001`  
+**Purpose**: Python SDK data system builder with Relay-first LaunchDarkly fallback  
+**Access**: `http://localhost:${DATA_SYSTEM_PORT}`
+
+The data-system service demonstrates:
+- `datasystem.custom()` fallback path: Relay streaming → LaunchDarkly streaming → LaunchDarkly polling
+- Streaming through Relay Proxy as the primary source
+- Automatic fallback to LaunchDarkly streaming, then polling
+- Kill/restore Relay Proxy so other Relay clients fail while this SDK falls back to LaunchDarkly
+
+**Port Mapping**: `${DATA_SYSTEM_PORT}:5001` (external:internal)
 
 ### Squid Proxy Service
 
@@ -248,7 +263,7 @@ The dashboard service uses `envsubst` to inject port variables into HTML files a
 set -e
 
 # Define all variables for substitution
-ENVSUBST_VARS='${LAUNCHDARKLY_CLIENT_SIDE_ID} ${DASHBOARD_PORT} ${API_SERVICE_PORT} ${NODE_SERVICE_PORT} ${PHP_SERVICE_PORT} ${PYTHON_SERVICE_PORT} ${SQUID_PROXY_PORT}'
+ENVSUBST_VARS='${LAUNCHDARKLY_CLIENT_SIDE_ID} ${DASHBOARD_PORT} ${API_SERVICE_PORT} ${NODE_SERVICE_PORT} ${PHP_SERVICE_PORT} ${PYTHON_SERVICE_PORT} ${DATA_SYSTEM_PORT} ${SQUID_PROXY_PORT}'
 
 # Substitute environment variables in dashboard.html
 envsubst "$ENVSUBST_VARS" < /usr/share/nginx/html/dashboard.template.html > /usr/share/nginx/html/dashboard.html
