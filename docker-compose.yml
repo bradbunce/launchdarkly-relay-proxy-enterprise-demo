@@ -82,6 +82,8 @@ services:
       - PHP_APP_URL=http://php-app-dev:80
       - PYTHON_APP_URL=http://python-app-dev:${PYTHON_SERVICE_PORT:-5000}
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
+      - LAUNCHDARKLY_CLIENT_SIDE_ID=${LAUNCHDARKLY_CLIENT_SIDE_ID:-}
+      - REDIS_PREFIX=${REDIS_PREFIX:-}
     # Volume Mounts:
     # - Docker socket: Required for executing Docker commands (logs, stats, container control)
     #   Mounted read-write to allow container inspection and control
@@ -246,6 +248,7 @@ services:
     # - DASHBOARD_PORT: Dashboard port for CORS configuration
     environment:
       - LAUNCHDARKLY_SDK_KEY=${LAUNCHDARKLY_SDK_KEY}
+      - LAUNCHDARKLY_CLIENT_SIDE_ID=${LAUNCHDARKLY_CLIENT_SIDE_ID:-}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PREFIX=${REDIS_PREFIX:-}

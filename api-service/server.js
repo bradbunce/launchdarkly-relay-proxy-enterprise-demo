@@ -628,7 +628,7 @@ app.post('/api/redis/restart', async (req, res) => {
   }
 });
 
-// Redis data store endpoint - fetch all LaunchDarkly flags from Redis
+// Redis data store endpoint - fetch LaunchDarkly flags from Redis
 app.post('/api/redis/data-store', async (req, res) => {
   try {
     // First check if Redis is running
@@ -640,9 +640,22 @@ app.post('/api/redis/data-store', async (req, res) => {
       });
     }
     
-    // Get all LaunchDarkly feature flag keys
+    // Prefer configured prefix (PHP/REDIS_PREFIX) or client-side ID env, else all prefixes
+    const configuredPrefix = process.env.REDIS_PREFIX || '';
+    const clientSideId = process.env.LAUNCHDARKLY_CLIENT_SIDE_ID || '';
+    const preferredKey = configuredPrefix
+      ? `${configuredPrefix}:features`
+      : (clientSideId ? `ld-flags-${clientSideId}:features` : null);
+
     const { stdout: keysOutput } = await execPromise('docker exec redis redis-cli --scan --pattern "ld-flags-*:features"');
-    const keys = keysOutput.trim().split('\n').filter(k => k.trim());
+    let keys = keysOutput.trim().split('\n').filter(k => k.trim());
+
+    if (preferredKey && keys.includes(preferredKey)) {
+      keys = [preferredKey];
+    } else if (preferredKey) {
+      // Preferred key may exist even if scan raced empty — try it explicitly
+      keys = [preferredKey];
+    }
     
     if (keys.length === 0) {
       return res.json({
@@ -659,7 +672,7 @@ app.post('/api/redis/data-store', async (req, res) => {
       try {
         // Use HGETALL to get all fields from the hash
         const { stdout: hashOutput } = await execPromise(`docker exec redis redis-cli HGETALL "${key}"`);
-        const lines = hashOutput.trim().split('\n');
+        const lines = hashOutput.trim().split('\n').filter(Boolean);
         
         // Parse hash output (alternating field/value pairs)
         for (let i = 0; i < lines.length; i += 2) {
@@ -682,7 +695,8 @@ app.post('/api/redis/data-store', async (req, res) => {
     res.json({
       success: true,
       flags: flags,
-      keyCount: keys.length
+      keyCount: keys.length,
+      keys
     });
   } catch (error) {
     logError('/api/redis/data-store', error, {

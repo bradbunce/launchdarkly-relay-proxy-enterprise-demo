@@ -521,6 +521,7 @@ if ($requestUri === '/api/redis-cache' && $requestMethod === 'POST') {
         $redisHost = getenv('REDIS_HOST') ?: 'redis';
         $redisPort = getenv('REDIS_PORT') ?: 6379;
         $redisPrefix = getenv('REDIS_PREFIX') ?: '';
+        $clientSideId = getenv('LAUNCHDARKLY_CLIENT_SIDE_ID') ?: '';
         
         // Initialize Redis client
         $redisClient = new Predis\Client([
@@ -545,19 +546,25 @@ if ($requestUri === '/api/redis-cache' && $requestMethod === 'POST') {
         log_message("Accessing Redis directly (context-independent)");
         log_message("Redis prefix: " . ($redisPrefix ?: '(none)'));
         
-        // Get all flag keys from Redis
-        // The LaunchDarkly Relay Proxy stores flags with the pattern: {prefix}:features
-        $flagsKey = $redisPrefix ? "{$redisPrefix}:features" : "features";
+        // Resolve which Redis hash key(s) to read
+        $flagsKeys = [];
+        if ($redisPrefix) {
+            $flagsKeys[] = "{$redisPrefix}:features";
+        } elseif ($clientSideId) {
+            $flagsKeys[] = "ld-flags-{$clientSideId}:features";
+        } else {
+            // Auto-discover Relay Proxy prefixes
+            $flagsKeys = $redisClient->keys('ld-flags-*:features') ?: [];
+        }
         
-        log_message("Looking for flags at key: {$flagsKey}");
+        log_message("Looking for flags at keys: " . implode(', ', $flagsKeys ?: ['(none)']));
         
-        // Get flags from Redis hash
-        $allFlags = $redisClient->hgetall($flagsKey);
-        
-        // Parse JSON values
         $parsedFlags = [];
-        foreach ($allFlags as $key => $value) {
-            $parsedFlags[$key] = json_decode($value, true);
+        foreach ($flagsKeys as $flagsKey) {
+            $allFlags = $redisClient->hgetall($flagsKey);
+            foreach ($allFlags as $key => $value) {
+                $parsedFlags[$key] = json_decode($value, true);
+            }
         }
         
         log_message("Raw Flag Configurations: " . count($parsedFlags) . " flags");
@@ -566,7 +573,8 @@ if ($requestUri === '/api/redis-cache' && $requestMethod === 'POST') {
             'success' => true,
             'flags' => $parsedFlags,
             'storeType' => 'redis',
-            'contextIndependent' => true
+            'contextIndependent' => true,
+            'keys' => $flagsKeys
         ]);
     } catch (Exception $e) {
         log_message("PHP ERROR getting Redis data store: " . $e->getMessage());
