@@ -55,12 +55,11 @@ _init_elapsed_ms = None
 
 
 class DataSourceTracker(logging.Handler):
-    """Watch SDK logs to follow which synchronizer is actually running."""
+    """Follow the stream URL the SDK actually connected to."""
 
-    _starting = re.compile(r"Synchronizer (\w+) \(index (\d+)\) is starting")
-    _fallback = re.compile(r"moving to synchronizer at index (\d+)")
+    _connecting = re.compile(r"Connecting to stream at (\S+)")
     _recover = re.compile(r"returning to first synchronizer")
-    _removed = re.compile(r"Synchronizer (\w+) permanently failed")
+    _removed = re.compile(r"Synchronizer \w+ permanently failed")
 
     def __init__(self, relay_host):
         super().__init__(level=logging.DEBUG)
@@ -83,77 +82,60 @@ class DataSourceTracker(logging.Handler):
         interesting = any(token in lowered for token in (
             "stream", "poll", "connect", "reconnect", "synchronizer",
             "datasystem", "data source", "launchdarkly", self.relay_host,
-            "fallback", "error", "timeout", "404", "recover",
+            "fallback", "error", "timeout", "401", "404", "recover",
         ))
         if not interesting:
             return
 
-        event = {
+        self.events.append({
             "timestamp": int(time.time() * 1000),
             "level": record.levelname,
             "logger": record.name,
             "message": message[:400],
-        }
-        self.events.append(event)
-        self.last_event_at = event["timestamp"]
+        })
+        self.last_event_at = self.events[-1]["timestamp"]
 
-        started = self._starting.search(message)
-        if started:
-            reported_index = int(started.group(2))
-            if reported_index == 0:
+        connecting = self._connecting.search(message)
+        if connecting:
+            url = connecting.group(1)
+            if self.relay_host and self.relay_host in url.lower():
+                self.last_host = self.relay_host
+                self.last_source = "relay"
+                self.last_mode = "streaming"
+                self.active_index = 0
                 self.relay_failed = False
-            self.active_index = reported_index
-            self._apply_index(self.active_index)
-
-        fallback = self._fallback.search(message)
-        if fallback:
-            self.active_index = int(fallback.group(1))
-            if self.active_index > 0:
+            elif "launchdarkly.com" in url.lower():
+                self.last_host = "launchdarkly.com"
+                self.last_source = "launchdarkly"
+                self.last_mode = "polling" if "poll" in url.lower() else "streaming"
+                self.active_index = 1
                 self.relay_failed = True
-            self._apply_index(self.active_index)
 
         if self._recover.search(message):
             self.active_index = 0
             self.relay_failed = False
-            self._apply_index(0)
-
-        if self._removed.search(message) and self.active_index == 0:
-            self.relay_failed = True
-
-        if self.relay_host and self.relay_host in lowered:
-            self.last_host = self.relay_host
-        elif "launchdarkly.com" in lowered:
-            self.last_host = "launchdarkly.com"
-            self.last_source = "launchdarkly"
-
-        if "poll" in lowered:
-            self.last_mode = "polling"
-        elif "stream" in lowered:
-            self.last_mode = "streaming"
-
-    def _apply_index(self, index):
-        if index <= 0:
             self.last_source = "relay"
             self.last_mode = "streaming"
-        elif index == 1:
-            self.last_source = "launchdarkly"
-            self.last_mode = "streaming"
-        else:
-            self.last_source = "launchdarkly"
+
+        if self._removed.search(message) and self.last_source == "relay":
+            self.relay_failed = True
+
+        if "poll" in lowered and "launchdarkly.com" in lowered:
             self.last_mode = "polling"
+            self.last_source = "launchdarkly"
+            self.active_index = 2
+            self.relay_failed = True
 
 
 PATH_IDS = ("sync-relay-stream", "sync-ld-stream", "sync-ld-poll")
 
 data_source_tracker = DataSourceTracker(RELAY_HOST)
-for _logger_name in ("ldclient", "ldclient.impl", "ldclient.impl.datasystem"):
-    _sdk_logger = logging.getLogger(_logger_name)
-    _sdk_logger.addHandler(data_source_tracker)
-    _sdk_logger.setLevel(logging.INFO)
+logging.getLogger("ldclient").addHandler(data_source_tracker)
+logging.getLogger("ldclient").setLevel(logging.INFO)
 
 
 def _probe_relay_port(timeout=1.5):
-    """Return True when the SDK can open a TCP/HTTP path to the Relay port proxy."""
+    """Return True when Relay is listening. Port-open is not the same as ready-for-SDK-keys."""
     try:
         response = requests.get(f"{RELAY_URI}/status", timeout=timeout)
         return response.status_code < 500
@@ -161,11 +143,28 @@ def _probe_relay_port(timeout=1.5):
         return False
 
 
-def _wait_for_relay(timeout=30):
-    """Wait until Relay /status responds so the first streaming hop can connect."""
+def _relay_environments_ready(timeout=1.5):
+    """Relay accepts SDK keys only after AutoConfig environments are VALID."""
+    try:
+        response = requests.get(f"{RELAY_URI}/status", timeout=timeout)
+        if response.status_code >= 500:
+            return False
+        environments = (response.json() or {}).get("environments") or {}
+        if not environments:
+            return False
+        return all(
+            str((env.get("connectionStatus") or {}).get("state") or "").upper() == "VALID"
+            for env in environments.values()
+        )
+    except (requests.RequestException, ValueError, TypeError):
+        return False
+
+
+def _wait_for_relay(timeout=45):
+    """Wait until Relay can actually authorize the first streaming hop."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if _probe_relay_port():
+        if _relay_environments_ready():
             return True
         time.sleep(0.5)
     return False
@@ -208,9 +207,9 @@ def initialize_launchdarkly_sdk():
         logger.info("Fallback data source: LaunchDarkly streaming, then polling")
 
         if _wait_for_relay():
-            logger.info("Relay Proxy is reachable at %s", RELAY_URI)
+            logger.info("Relay Proxy environments are VALID at %s", RELAY_URI)
         else:
-            logger.warning("Relay Proxy not reachable yet; SDK will fall back to LaunchDarkly if streaming fails")
+            logger.warning("Relay Proxy not ready yet; SDK will fall back to LaunchDarkly if streaming fails")
 
         _init_started_at = time.time()
         config = Config(
