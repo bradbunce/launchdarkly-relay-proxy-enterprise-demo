@@ -2,7 +2,7 @@
 set -e
 
 # Define all variables for substitution
-ENVSUBST_VARS='${LAUNCHDARKLY_CLIENT_SIDE_ID} ${DASHBOARD_PORT} ${API_SERVICE_PORT} ${NODE_SERVICE_PORT} ${PHP_SERVICE_PORT} ${PYTHON_SERVICE_PORT} ${SQUID_PROXY_PORT}'
+ENVSUBST_VARS='${LAUNCHDARKLY_CLIENT_SIDE_ID} ${DASHBOARD_PORT} ${API_SERVICE_PORT} ${NODE_SERVICE_PORT} ${PHP_SERVICE_PORT} ${PYTHON_SERVICE_PORT} ${DATA_SYSTEM_PORT} ${SQUID_PROXY_PORT}'
 
 # Substitute environment variables in dashboard.html
 echo "Substituting environment variables in dashboard.html..."

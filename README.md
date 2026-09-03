@@ -17,6 +17,7 @@ A comprehensive demonstration application showcasing the LaunchDarkly Node.js se
 - **Live Container Logs**: Real-time viewing of app and relay proxy logs
 - **Redis Monitor**: Live stream of all Redis commands showing feature flag operations
 - **Relay Proxy Status**: Comprehensive status dashboard with health checks
+- **Data System Builder**: Python SDK `datasystem.custom()` with Relay-first streaming and LaunchDarkly fallback
 - **Performance Metrics**: Real-time CPU and memory monitoring
 - **Load Testing**: Built-in load testing tool with live results
 
@@ -130,6 +131,7 @@ docker-compose logs -f
 # API service: http://localhost:4000 (backend only)
 # PHP API: http://localhost:8080 (backend only)
 # Python API: http://localhost:5000 (backend only)
+# Data System API: http://localhost:5001 (backend only)
 ```
 
 **Relay proxy options** (pick one):
@@ -223,6 +225,7 @@ All user-facing services can be configured to use custom ports through the `.env
 - **Node.js Service** (default: 3000) - Node.js SDK demo
 - **PHP Service** (default: 8080) - PHP SDK demo
 - **Python Service** (default: 5000) - Python SDK demo
+- **Data System Service** (default: 5001) - Python SDK data system builder (Relay with LaunchDarkly fallback)
 - **Squid Proxy** (default: 3128) - HTTP proxy for relay-proxy connection management
 
 **Fixed Infrastructure Ports** (cannot be changed):
@@ -1015,9 +1018,9 @@ Requests/sec: 4118.44
 
 ## Architecture
 
-### 8-Container Architecture
+### 9-Container Architecture
 
-This application uses a microservices architecture with eight specialized containers:
+This application uses a microservices architecture with nine specialized containers:
 
 **dashboard** (Dashboard UI Container):
 - Nginx Alpine
@@ -1049,6 +1052,14 @@ This application uses a microservices architecture with eight specialized contai
 - Port: 5000
 - Purpose: LaunchDarkly Python SDK demonstration
 
+**data-system-app** (Data System Configuration Container):
+- Python 3.11 Alpine
+- Flask web server
+- LaunchDarkly Python SDK v9.14.1
+- **Mode**: `datasystem.custom()` — Relay-first with LaunchDarkly fallback
+- Port: 5001
+- Purpose: Demonstrate SDK data system fallback: Relay streaming → LaunchDarkly streaming → polling
+
 **php-app-dev** (PHP Application Container):
 - PHP 8.3-FPM Alpine
 - Nginx web server
@@ -1066,6 +1077,7 @@ This application uses a microservices architecture with eight specialized contai
 - Purpose: User interface with embedded JavaScript SDK demonstration
 
 **relay-proxy** (Relay Proxy Container):
+- LaunchDarkly Relay Proxy v9.0.0-rc.5 (FDv2 `/sdk/stream` for the Data System Builder)
 - Default: official `launchdarkly/ld-relay` image (`docker-compose.yml`)
 - FIPS: local build via `docker-compose-fips.yml` + `relay-proxy/Dockerfile.fips` (native Go `GOFIPS140=v1.0.0`)
 - Chainguard: local build via `docker-compose-chainguard.yml` + `relay-proxy/Dockerfile.chainguard`
@@ -1108,6 +1120,20 @@ The squid-proxy service is a critical infrastructure component that enables the 
 4. **Fast Disconnection**: When you click "Disconnect" in the dashboard, squid-proxy is stopped immediately - connection state changes within seconds
 5. **Fast Reconnection**: When you click "Connect", squid-proxy is started immediately - relay-proxy detects and reconnects quickly
 
+### Data System Configuration Builder
+
+The dashboard **Data System Builder** panel (to the right of Redis) shows the Python SDK fallback path in order:
+
+1. Stream from Relay Proxy
+2. Stream from LaunchDarkly directly
+3. Poll LaunchDarkly as last resort
+
+The SDK configuration lives in [`data-system/app.py`](data-system/app.py) in `_build_data_system_config()`.
+
+**Kill Relay Port** stops the `relay-proxy` container, taking port 8030 down for every Relay client. Node.js (proxy mode) and the JavaScript Client lose their data source and fail. This SDK keeps evaluating by walking that fallback path. PHP daemon mode may continue from Redis cache until that data goes stale. **Restore Relay Port** starts Relay again.
+
+This is different from the Relay Proxy **Disconnect** toggle, which uses squid-proxy to cut Relay's outbound connection to LaunchDarkly.
+
 **Benefits:**
 - **Speed**: Connection state changes happen in seconds, not minutes - ideal for rapid testing
 - **No Waiting**: Test connected/disconnected scenarios efficiently without long TCP timeout delays
@@ -1135,6 +1161,7 @@ All service ports are configurable via environment variables in the `.env` file,
 | API Service | 4000 | `API_SERVICE_PORT` | API endpoints for status and operations |
 | Node.js App | 3000 | `NODE_SERVICE_PORT` | Backend API only (no UI) |
 | Python App | 5000 | `PYTHON_SERVICE_PORT` | Backend API only (no UI) |
+| Data System App | 5001 | `DATA_SYSTEM_PORT` | Python SDK data system builder (Relay fallback demo) |
 | PHP App | 8080 | `PHP_SERVICE_PORT` | Backend API only (no UI) |
 | Relay Proxy | 8030 | **FIXED** | LaunchDarkly Relay Proxy (cannot be changed, exposed to host) |
 | Redis | 6379 | **FIXED** | Redis data store (cannot be changed, exposed to host) |

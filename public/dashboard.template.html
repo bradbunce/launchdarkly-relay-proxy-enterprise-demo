@@ -651,6 +651,333 @@
       cursor: not-allowed;
     }
 
+    #data-system-panel .service-header h2 {
+      font-size: 18px;
+      line-height: 1.25;
+    }
+
+    #data-system-panel {
+      min-width: 640px;
+    }
+
+    .ds-layout {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .ds-kicker {
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #405BFF;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .ds-subtitle {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 16px;
+      line-height: 1.45;
+    }
+
+    .ds-chain {
+      margin-bottom: 0;
+    }
+
+    .ds-chain-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: #333;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .ds-chain-label span {
+      font-weight: 500;
+      color: #888;
+      font-size: 11px;
+    }
+
+    .ds-nodes {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+    }
+
+    .ds-node {
+      flex: 1;
+      min-width: 0;
+      border: 1px solid #e4e7ef;
+      background: #fafbff;
+      padding: 12px;
+      position: relative;
+      transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+    }
+
+    .ds-node:first-child {
+      border-radius: 8px 8px 0 0;
+    }
+
+    .ds-node:last-child {
+      border-radius: 0 0 8px 8px;
+    }
+
+    .ds-node + .ds-node {
+      margin-top: -1px;
+    }
+
+    .ds-node.active {
+      background: #eef1ff;
+      border-color: #405BFF;
+      box-shadow: 0 0 0 2px rgba(64, 91, 255, 0.18);
+      z-index: 1;
+    }
+
+    .ds-node.failed {
+      background: #fff6f6;
+      border-color: #f44336;
+    }
+
+    .ds-node.initializing {
+      background: #fff8e8;
+      border-color: #ff9800;
+    }
+
+    .ds-node.standby {
+      opacity: 0.72;
+    }
+
+    .ds-node-rank {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #8a93b0;
+      margin-bottom: 6px;
+    }
+
+    .ds-node.active .ds-node-rank {
+      color: #405BFF;
+    }
+
+    .ds-node.failed .ds-node-rank {
+      color: #f44336;
+    }
+
+    .ds-node-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1b1f2a;
+      margin-bottom: 4px;
+    }
+
+    .ds-node-meta {
+      font-size: 11px;
+      color: #666;
+      font-family: 'IBM Plex Mono', 'SF Mono', ui-monospace, monospace;
+      margin-bottom: 8px;
+      word-break: break-all;
+    }
+
+    .ds-node-desc {
+      font-size: 12px;
+      color: #555;
+      line-height: 1.45;
+    }
+
+    .ds-node-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .ds-node-status .pip {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #c5c9d6;
+    }
+
+    .ds-node.active .pip {
+      background: #405BFF;
+      box-shadow: 0 0 0 4px rgba(64, 91, 255, 0.2);
+      animation: ds-pulse 1.6s ease-in-out infinite;
+    }
+
+    .ds-node.initializing .pip {
+      background: #ff9800;
+    }
+
+    @keyframes ds-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(64, 91, 255, 0.35); }
+      50% { box-shadow: 0 0 0 6px rgba(64, 91, 255, 0); }
+    }
+
+    .ds-arrow {
+      width: 100%;
+      height: 18px;
+      flex: 0 0 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #c0c5d6;
+      font-size: 14px;
+      z-index: 2;
+    }
+
+    .ds-side {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .ds-control-card {
+      border: 1px solid #eceff7;
+      border-radius: 8px;
+      padding: 16px;
+      background: #f8f9fd;
+    }
+
+    .ds-control-card h4 {
+      font-size: 13px;
+      margin: 0 0 6px;
+      color: #222;
+    }
+
+    .ds-port-state {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      margin: 12px 0;
+    }
+
+    .ds-port-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 6px 10px;
+      border-radius: 999px;
+    }
+
+    .ds-port-badge.open {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .ds-port-badge.killed {
+      background: #ffebee;
+      color: #c62828;
+    }
+
+    .ds-port-badge .pip {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .ds-kill-button {
+      width: 100%;
+      border: none;
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+    }
+
+    .ds-kill-button:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    .ds-kill-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .ds-kill-button.kill {
+      background: #f44336;
+      color: white;
+    }
+
+    .ds-kill-button.restore {
+      background: #2e7d32;
+      color: white;
+    }
+
+    .ds-flag-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1b1f2a;
+      padding: 10px 12px;
+      background: white;
+      border: 1px solid #e4e7ef;
+      border-radius: 6px;
+      margin-top: 8px;
+    }
+
+    .ds-code {
+      margin-top: 8px;
+      background: #151821;
+      color: #d7dce8;
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-family: 'IBM Plex Mono', 'SF Mono', ui-monospace, monospace;
+      font-size: 11px;
+      line-height: 1.55;
+      overflow-x: auto;
+      max-height: 160px;
+    }
+
+    .ds-code .cm {
+      color: #7d8597;
+    }
+
+    .ds-code .kw {
+      color: #9cdcfe;
+    }
+
+    .ds-code .fn {
+      color: #dcdcaa;
+    }
+
+    .ds-code .st {
+      color: #ce9178;
+    }
+
+    .ds-events {
+      font-family: 'IBM Plex Mono', 'SF Mono', ui-monospace, monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #555;
+      background: white;
+      border: 1px solid #e4e7ef;
+      border-radius: 6px;
+      padding: 10px 12px;
+      max-height: 140px;
+      overflow-y: auto;
+      min-height: 72px;
+    }
+
+    .ds-events .empty {
+      color: #999;
+      font-style: italic;
+    }
+
     .status-text {
       font-weight: 500;
       padding: 4px 12px;
@@ -1293,7 +1620,101 @@
         </div>
         </div><!-- /.panel-body -->
       </div>
-      </div><!-- /.services-right -->
+
+      <!-- Redis Panel -->
+      <div class="service-panel" id="redis-panel">
+        <div class="service-header">
+          <div class="service-header-left">
+            <img src="Redis_logo.svg.png" alt="Redis" class="service-logo" />
+            <h2>Redis</h2>
+          </div>
+          <div class="service-header-right">
+            <button id="redis-start-button" class="control-icon-button start" title="Start Redis">▶</button>
+            <button id="redis-stop-button" class="control-icon-button stop" title="Stop Redis">■</button>
+            <button id="redis-restart-button" class="control-icon-button restart" title="Restart Redis">↻</button>
+            <div class="status-indicator" id="redis-status">
+              <span class="status-dot red dimmed" id="redis-status-red"></span>
+              <span class="status-dot orange dimmed" id="redis-status-orange"></span>
+              <span class="status-dot green dimmed" id="redis-status-green"></span>
+            </div>
+          </div>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+          <div style="font-size: 14px; color: #666; margin-bottom: 10px;">
+            <strong>Status:</strong> <span id="redis-status-text">Checking...</span>
+          </div>
+          <div style="font-size: 14px; color: #666;">
+            <strong>Port:</strong> 6379
+          </div>
+        </div>
+        
+        <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+          <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">Redis Data Store</h4>
+          <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
+            Raw flag configurations stored in Redis
+          </div>
+          <div id="redis-data-store" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px 10px 30px 10px; border-radius: 4px;">
+            <div style="color: #999; font-style: italic;">Waiting for Redis to initialize...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data System Builder -->
+      <div class="service-panel" id="data-system-panel">
+        <div class="service-header">
+          <div class="service-header-left">
+            <img src="launchdarkly-logo.svg" alt="LaunchDarkly" class="service-logo" />
+            <h2>Data System Builder</h2>
+          </div>
+          <div class="service-header-right">
+            <div class="status-indicator" id="data-system-status">
+              <span class="status-dot red dimmed" id="data-system-status-red"></span>
+              <span class="status-dot orange dimmed" id="data-system-status-orange"></span>
+              <span class="status-dot green dimmed" id="data-system-status-green"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ds-kicker">Python SDK · datasystem.custom()</div>
+        <div class="ds-subtitle">
+          Live fallback path: stream Relay first, then stream LaunchDarkly, then poll LaunchDarkly.
+        </div>
+
+        <div class="ds-layout">
+          <div class="ds-control-card">
+            <h4>Relay Proxy port 8030</h4>
+            <div class="control-description">
+              Stops the Relay Proxy. Node.js and the JavaScript Client fail.
+              This SDK keeps evaluating by walking the fallback path to LaunchDarkly.
+            </div>
+            <div class="ds-port-state">
+              <span id="ds-port-badge" class="ds-port-badge open"><span class="pip"></span>Port 8030 open</span>
+              <span id="ds-active-label" style="font-size: 12px; color: #555;">Active: —</span>
+            </div>
+            <button id="ds-relay-port-button" class="ds-kill-button kill" type="button">
+              Kill Relay Port
+            </button>
+            <div id="ds-port-message" class="control-description" style="margin-top: 8px;"></div>
+          </div>
+
+          <div class="ds-chain">
+            <div class="ds-chain-label">Fallback path <span>what the SDK tries, in order</span></div>
+            <div class="ds-nodes" id="ds-path"></div>
+          </div>
+
+          <div class="ds-control-card">
+            <h4>Feature flag: user-message</h4>
+            <div class="control-description">Evaluations keep working after fallback.</div>
+            <div class="ds-flag-value" id="ds-flag-value">Loading…</div>
+          </div>
+
+          <div class="ds-control-card">
+            <h4>SDK log trail</h4>
+            <div class="ds-events" id="ds-events"><div class="empty">Waiting for SDK events…</div></div>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -6726,7 +7147,148 @@
           }
         });
       }
+
+      initDataSystemPanel();
     });
+
+    function initDataSystemPanel() {
+      const apiBase = 'http://localhost:${API_SERVICE_PORT}';
+      const pathEl = document.getElementById('ds-path');
+      const eventsEl = document.getElementById('ds-events');
+      const flagEl = document.getElementById('ds-flag-value');
+      const badgeEl = document.getElementById('ds-port-badge');
+      const activeEl = document.getElementById('ds-active-label');
+      const messageEl = document.getElementById('ds-port-message');
+      const buttonEl = document.getElementById('ds-relay-port-button');
+      let busy = false;
+
+      function renderNodes(container, nodes) {
+        if (!container) return;
+        if (!nodes || !nodes.length) {
+          container.innerHTML = '<div class="ds-node standby"><div class="ds-node-desc">Waiting for SDK status…</div></div>';
+          return;
+        }
+        container.innerHTML = nodes.map((node, index) => {
+          const rank = node.rank || (index === 0 ? 'Hits first' : index === 1 ? 'Fallback' : 'Last resort');
+          const arrow = index < nodes.length - 1 ? '<div class="ds-arrow">↓</div>' : '';
+          return `
+            <div class="ds-node ${node.status || 'standby'}">
+              <div class="ds-node-rank">${escapeHtml(rank)}</div>
+              <div class="ds-node-title">${escapeHtml(node.kind)} → ${escapeHtml(node.target)}</div>
+              <div class="ds-node-meta">${escapeHtml(node.uri)}</div>
+              <div class="ds-node-desc">${escapeHtml(node.description)}</div>
+              <div class="ds-node-status"><span class="pip"></span>${escapeHtml(node.status || 'standby')}</div>
+            </div>
+            ${arrow}
+          `;
+        }).join('');
+      }
+
+      function renderEvents(events) {
+        if (!eventsEl) return;
+        if (!events || !events.length) {
+          eventsEl.innerHTML = '<div class="empty">Waiting for SDK events…</div>';
+          return;
+        }
+        eventsEl.innerHTML = events.slice().reverse().map((event) => {
+          return `<div>${escapeHtml(event.level)} · ${escapeHtml(event.message)}</div>`;
+        }).join('');
+      }
+
+      function setPortUi(open) {
+        if (badgeEl) {
+          badgeEl.className = `ds-port-badge ${open ? 'open' : 'killed'}`;
+          badgeEl.innerHTML = `<span class="pip"></span>${open ? 'Port 8030 open' : 'Port 8030 killed'}`;
+        }
+        if (buttonEl && !busy) {
+          buttonEl.className = `ds-kill-button ${open ? 'kill' : 'restore'}`;
+          buttonEl.textContent = open ? 'Kill Relay Port' : 'Restore Relay Port';
+        }
+      }
+
+      async function refresh() {
+        try {
+          const response = await fetch(`${apiBase}/api/data-system/status`);
+          const data = await response.json();
+          const open = data.relayPortOpen !== false && data.relayPortState !== 'killed';
+          const path = data.path || [];
+          setPortUi(open);
+          if (!open) {
+            path.forEach((node) => {
+              if (node.id && node.id.includes('relay')) {
+                node.status = 'failed';
+              } else if (node.id === 'sync-ld-stream' && (!data.activeSource || data.activeSource.mode !== 'polling')) {
+                node.status = 'active';
+              } else if (node.id === 'sync-ld-poll' && data.activeSource && data.activeSource.mode === 'polling') {
+                node.status = 'active';
+              }
+            });
+            if (!data.activeSource || data.activeSource.source === 'relay') {
+              data.activeSource = {
+                label: 'Streaming from LaunchDarkly directly',
+                source: 'launchdarkly'
+              };
+            }
+          }
+          renderNodes(pathEl, path);
+          renderEvents(data.events);
+          if (flagEl) {
+            flagEl.textContent = (data.flag && data.flag.value) || data.error || 'Unavailable';
+          }
+          if (activeEl) {
+            const state = data.activeSource && data.activeSource.dataSourceState
+              ? ` (${data.activeSource.dataSourceState})`
+              : '';
+            activeEl.textContent = `Active: ${data.activeSource && data.activeSource.label ? data.activeSource.label : '—'}${state}`;
+          }
+          if (messageEl && data.initializationError && !busy) {
+            messageEl.textContent = data.initializationError;
+          }
+          if (data.sdkInitialized) {
+            updatePillStatus('data-system', open ? 'connected' : 'degraded');
+          } else {
+            updatePillStatus('data-system', 'disconnected');
+          }
+        } catch (error) {
+          updatePillStatus('data-system', 'disconnected');
+          if (flagEl) flagEl.textContent = 'Data system service unavailable';
+        }
+      }
+
+      if (buttonEl) {
+        buttonEl.addEventListener('click', async () => {
+          const restoring = buttonEl.classList.contains('restore');
+          busy = true;
+          buttonEl.disabled = true;
+            buttonEl.textContent = restoring ? 'Restoring Relay…' : 'Stopping Relay…';
+            if (messageEl) {
+              messageEl.textContent = restoring
+                ? 'Bringing Relay Proxy back. Node.js and JavaScript Client should recover; this SDK can prefer Relay again.'
+                : 'Stopping Relay Proxy. Watch Node.js and JavaScript Client fail while this SDK falls back to LaunchDarkly.';
+            }
+          try {
+            const endpoint = restoring
+              ? '/api/data-system/relay-port/restore'
+              : '/api/data-system/relay-port/kill';
+            const response = await fetch(`${apiBase}${endpoint}`, { method: 'POST' });
+            const data = await response.json();
+            if (!data.success) {
+              alert(data.error || 'Relay port action failed');
+            }
+            await refresh();
+          } catch (error) {
+            alert(`Relay port action failed: ${error.message}`);
+          } finally {
+            busy = false;
+            buttonEl.disabled = false;
+            await refresh();
+          }
+        });
+      }
+
+      refresh();
+      setInterval(refresh, 2000);
+    }
   </script>
 </body>
 </html>

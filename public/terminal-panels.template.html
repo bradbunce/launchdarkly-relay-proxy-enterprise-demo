@@ -23,7 +23,7 @@
 
     .logs-section {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 10px;
       padding: 10px;
       background-color: #0a0a0a;
@@ -110,6 +110,15 @@
         <button id="relay-proxy-clear">Clear</button>
       </div>
       <div class="log-console-output" id="relay-proxy-output"></div>
+    </div>
+
+    <!-- Data System App Log Console -->
+    <div class="log-console" id="data-system-app-console">
+      <div class="log-console-header">
+        <h3>data-system-app</h3>
+        <button id="data-system-app-clear">Clear</button>
+      </div>
+      <div class="log-console-output" id="data-system-app-output"></div>
     </div>
 
     <!-- Redis Monitor Console -->
@@ -272,18 +281,21 @@
     let nodeAppDevConsole;
     let phpAppDevConsole;
     let relayProxyConsole;
+    let dataSystemConsole;
     let redisMonitorConsole;
 
     // Create log console instances
     nodeAppDevConsole = new LogConsole('node-app-dev', 'node-app-dev-output', 'polling');
     phpAppDevConsole = new LogConsole('php-app-dev', 'php-app-dev-output', 'polling');
     relayProxyConsole = new LogConsole('relay-proxy', 'relay-proxy-output', 'polling');
+    dataSystemConsole = new LogConsole('data-system-app', 'data-system-app-output', 'polling');
     redisMonitorConsole = new LogConsole('redis', 'redis-monitor-output', 'sse');
 
     // Start log consoles
     nodeAppDevConsole.start();
     phpAppDevConsole.start();
     relayProxyConsole.start();
+    dataSystemConsole.start();
     redisMonitorConsole.start();
 
     // Set up clear button handlers
@@ -305,6 +317,13 @@
     if (relayProxyClearBtn) {
       relayProxyClearBtn.addEventListener('click', () => {
         relayProxyConsole.clear();
+      });
+    }
+
+    const dataSystemClearBtn = document.getElementById('data-system-app-clear');
+    if (dataSystemClearBtn) {
+      dataSystemClearBtn.addEventListener('click', () => {
+        dataSystemConsole.clear();
       });
     }
 
