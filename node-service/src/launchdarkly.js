@@ -16,13 +16,14 @@ class InspectableInMemoryStore {
       features: {},
       segments: {}
     };
-    this.initialized = false;
+    // Must not be named `initialized` — that shadows the initialized() method the SDK calls
+    this.isInitialized = false;
   }
 
   init(allData, cb) {
     console.log('=== INITIALIZING SDK CACHE ===');
     this.data = allData || { features: {}, segments: {} };
-    this.initialized = true;
+    this.isInitialized = true;
     
     console.log('Flags cached:', Object.keys(this.data.features).length);
     console.log('Segments cached:', Object.keys(this.data.segments).length);
@@ -67,8 +68,8 @@ class InspectableInMemoryStore {
   }
 
   initialized(cb) {
-    if (cb) cb(this.initialized);
-    return Promise.resolve(this.initialized);
+    if (cb) cb(this.isInitialized);
+    return Promise.resolve(this.isInitialized);
   }
 
   close() {
