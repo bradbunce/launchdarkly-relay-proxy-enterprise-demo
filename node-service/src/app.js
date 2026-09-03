@@ -1156,7 +1156,7 @@ function createApp() {
     const isInitialized = ldClient ? ldClient.initialized() : false;
     
     // Also check if the store has been initialized with data
-    const storeHasData = store ? store.initialized : false;
+    const storeHasData = store ? store.isInitialized : false;
     
     // Consider connected if either SDK reports initialized OR store has data
     const connected = (isInitialized || storeHasData) && !initError;
