@@ -132,6 +132,19 @@ docker-compose logs -f
 # Python API: http://localhost:5000 (backend only)
 ```
 
+**Relay proxy options** (pick one):
+
+```bash
+# Default — official LaunchDarkly image
+docker compose up -d
+
+# LaunchDarkly native FIPS (GOFIPS140, relay-proxy/Dockerfile.fips)
+docker compose -f docker-compose.yml -f docker-compose-fips.yml up -d --build
+
+# Chainguard go-fips only (relay-proxy/Dockerfile.chainguard; set CHAINGUARD_ORG in .env)
+docker compose -f docker-compose.yml -f docker-compose-chainguard.yml up -d --build
+```
+
 ### 4. Changing Configuration
 
 After modifying `.env` file:
@@ -1053,7 +1066,9 @@ This application uses a microservices architecture with eight specialized contai
 - Purpose: User interface with embedded JavaScript SDK demonstration
 
 **relay-proxy** (Relay Proxy Container):
-- LaunchDarkly Relay Proxy v8.16.4
+- Default: official `launchdarkly/ld-relay` image (`docker-compose.yml`)
+- FIPS: local build via `docker-compose-fips.yml` + `relay-proxy/Dockerfile.fips` (native Go `GOFIPS140=v1.0.0`)
+- Chainguard: local build via `docker-compose-chainguard.yml` + `relay-proxy/Dockerfile.chainguard`
 - AutoConfig mode
 - Event forwarding enabled
 - Redis integration for persistent storage
